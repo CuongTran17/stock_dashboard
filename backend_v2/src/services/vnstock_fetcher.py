@@ -1,0 +1,700 @@
+import asyncio
+import logging
+import os
+import time
+from datetime import date, datetime, time as dt_time, timedelta
+from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+from vnstock import Quote, change_api_key
+
+from src.database.db import SessionLocal
+from src.database.models import DailyOHLCV
+
+logger = logging.getLogger(__name__)
+
+# VN30 Basket
+VN30_SYMBOLS = [
+    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
+    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
+    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE",
+]
+VN30_SYMBOL_SET = {symbol.upper() for symbol in VN30_SYMBOLS}
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+QUOTE_SOURCE = os.getenv("VNSTOCK_QUOTE_SOURCE", "vci").lower()
+INTRADAY_PAGE_SIZE = max(int(os.getenv("VNSTOCK_INTRADAY_PAGE_SIZE", "50")), 1)
+MAX_TICKS_PER_SYMBOL = max(int(os.getenv("VNSTOCK_MAX_TICKS_PER_SYMBOL", "1200")), 100)
+DEFAULT_HISTORY_LOOKBACK_DAYS = max(int(os.getenv("VNSTOCK_HISTORY_LOOKBACK_DAYS", "365")), 30)
+MIN_REQUEST_INTERVAL_SECONDS = max(float(os.getenv("VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS", "1.05")), 0.6)
+OUT_OF_SESSION_POLL_SECONDS = max(int(os.getenv("VNSTOCK_OUT_OF_SESSION_POLL_SECONDS", "60")), 15)
+
+TRADING_MORNING_START = dt_time(hour=9, minute=0)
+TRADING_MORNING_END = dt_time(hour=11, minute=30)
+TRADING_AFTERNOON_START = dt_time(hour=13, minute=0)
+TRADING_AFTERNOON_END = dt_time(hour=15, minute=0)
+
+
+def normalize_symbol(symbol: str) -> str:
+    return (symbol or "").strip().upper()
+
+
+def is_vn30_symbol(symbol: str) -> bool:
+    return normalize_symbol(symbol) in VN30_SYMBOL_SET
+
+
+def parse_symbols_query(symbols: Optional[str], fallback: Optional[List[str]] = None) -> List[str]:
+    fallback_symbols = fallback or VN30_SYMBOLS
+    if not symbols:
+        return [symbol for symbol in fallback_symbols if is_vn30_symbol(symbol)]
+
+    parsed: List[str] = []
+    for raw in symbols.replace(";", ",").split(","):
+        symbol = normalize_symbol(raw)
+        if not symbol or symbol in parsed:
+            continue
+        if is_vn30_symbol(symbol):
+            parsed.append(symbol)
+
+    return parsed or [symbol for symbol in fallback_symbols if is_vn30_symbol(symbol)]
+
+
+def _to_float(value: Any, fallback: float = 0.0) -> float:
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return fallback
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _to_int(value: Any, fallback: int = 0) -> int:
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return fallback
+        return int(float(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _to_iso_time(value: Any) -> str:
+    if isinstance(value, pd.Timestamp):
+        dt = value.to_pydatetime()
+    elif isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    else:
+        return datetime.now(tz=VN_TZ).isoformat()
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=VN_TZ)
+    return dt.astimezone(VN_TZ).isoformat()
+
+
+def _to_date(value: Any) -> Optional[date]:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime().date()
+    if isinstance(value, str):
+        parsed = value.strip()
+        if not parsed:
+            return None
+        try:
+            return datetime.fromisoformat(parsed.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+    return None
+
+
+def _empty_snapshot(symbol: str) -> Dict[str, Any]:
+    now_iso = datetime.now(tz=VN_TZ).isoformat()
+    return {
+        "symbol": symbol,
+        "companyName": symbol,
+        "price": 0.0,
+        "change": 0.0,
+        "changePercent": 0.0,
+        "volume": 0,
+        "high": 0.0,
+        "low": 0.0,
+        "open": 0.0,
+        "refPrice": 0.0,
+        "lastUpdate": now_iso,
+        "syncedAt": None,
+    }
+
+
+# In-memory caches used by API + websocket handlers.
+intraday_cache: Dict[str, List[Dict[str, Any]]] = {symbol: [] for symbol in VN30_SYMBOLS}
+latest_snapshot_cache: Dict[str, Dict[str, Any]] = {symbol: _empty_snapshot(symbol) for symbol in VN30_SYMBOLS}
+
+
+class VnstockFetcherService:
+    def __init__(self):
+        self.is_running = False
+        self.quote_source = QUOTE_SOURCE
+        self.intraday_page_size = INTRADAY_PAGE_SIZE
+        self.max_ticks_per_symbol = MAX_TICKS_PER_SYMBOL
+        self.default_history_lookback_days = DEFAULT_HISTORY_LOOKBACK_DAYS
+        self.min_request_interval = MIN_REQUEST_INTERVAL_SECONDS
+
+        self.last_intraday_sync_at: Optional[str] = None
+        self.last_history_sync_at: Dict[str, str] = {}
+
+        self._known_tick_ids: Dict[str, set[str]] = {symbol: set() for symbol in VN30_SYMBOLS}
+        self._stop_event = asyncio.Event()
+        self._cache_lock = asyncio.Lock()
+        self._rate_lock = asyncio.Lock()
+        self._last_request_at = 0.0
+
+        self._configure_api_key()
+
+    def _configure_api_key(self) -> None:
+        api_key = os.getenv("VNSTOCK_API_KEY") or os.getenv("VNAI_API_KEY")
+        if not api_key:
+            logger.warning("VNSTOCK_API_KEY is not set. Using anonymous/community access.")
+            return
+
+        try:
+            changed = change_api_key(api_key)
+            logger.info("VNStock API key configured (%s)", "updated" if changed else "already active")
+        except BaseException as exc:  # vnstock may raise SystemExit on quota/auth failures.
+            logger.warning("Failed to configure VNStock API key: %s", exc)
+
+    async def _respect_rate_limit(self) -> None:
+        async with self._rate_lock:
+            elapsed = time.monotonic() - self._last_request_at
+            if elapsed < self.min_request_interval:
+                await asyncio.sleep(self.min_request_interval - elapsed)
+            self._last_request_at = time.monotonic()
+
+    async def wait_for_rate_slot(self) -> None:
+        await self._respect_rate_limit()
+
+    def is_intraday_fetch_window(self, now: Optional[datetime] = None) -> bool:
+        current = now or datetime.now(tz=VN_TZ)
+        if current.weekday() >= 5:  # Saturday/Sunday
+            return False
+
+        current_time = current.timetz().replace(tzinfo=None)
+        in_morning = TRADING_MORNING_START <= current_time <= TRADING_MORNING_END
+        in_afternoon = TRADING_AFTERNOON_START <= current_time <= TRADING_AFTERNOON_END
+        return in_morning or in_afternoon
+
+    def _seconds_until_next_intraday_window(self, now: Optional[datetime] = None) -> float:
+        current = now or datetime.now(tz=VN_TZ)
+        if self.is_intraday_fetch_window(current):
+            return 0.0
+
+        for day_offset in range(0, 8):
+            day_anchor = (current + timedelta(days=day_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+            if day_anchor.weekday() >= 5:
+                continue
+
+            starts = [
+                day_anchor.replace(
+                    hour=TRADING_MORNING_START.hour,
+                    minute=TRADING_MORNING_START.minute,
+                    second=0,
+                    microsecond=0,
+                ),
+                day_anchor.replace(
+                    hour=TRADING_AFTERNOON_START.hour,
+                    minute=TRADING_AFTERNOON_START.minute,
+                    second=0,
+                    microsecond=0,
+                ),
+            ]
+
+            for candidate in starts:
+                if candidate > current:
+                    return max((candidate - current).total_seconds(), 1.0)
+
+        return float(OUT_OF_SESSION_POLL_SECONDS)
+
+    def _fetch_intraday_sync(self, symbol: str) -> Optional[pd.DataFrame]:
+        quote = Quote(source=self.quote_source, symbol=symbol)
+        return quote.intraday(page_size=self.intraday_page_size)
+
+    def _fetch_history_sync(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
+        quote = Quote(source=self.quote_source, symbol=symbol)
+        return quote.history(start=start, end=end, interval="1D")
+
+    @staticmethod
+    def _tick_key(tick: Dict[str, Any]) -> str:
+        symbol = normalize_symbol(tick.get("symbol", ""))
+        tick_id = str(tick.get("id") or "")
+        if tick_id:
+            return f"{symbol}|{tick_id}"
+        return f"{symbol}|{tick.get('time')}|{tick.get('price')}|{tick.get('volume')}"
+
+    def _normalize_intraday_rows(self, symbol: str, frame: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+        if frame is None or frame.empty:
+            return []
+
+        ticks: List[Dict[str, Any]] = []
+        rows = frame.to_dict("records")
+        for raw in rows:
+            price = _to_float(raw.get("price"))
+            if price <= 0:
+                continue
+
+            tick_time = _to_iso_time(raw.get("time"))
+            volume = _to_int(raw.get("volume"))
+            tick_id = str(raw.get("id") or "")
+            if not tick_id:
+                tick_id = f"{tick_time}|{price}|{volume}"
+
+            ticks.append(
+                {
+                    "id": tick_id,
+                    "symbol": symbol,
+                    "time": tick_time,
+                    "price": price,
+                    "volume": volume,
+                    "match_type": str(raw.get("match_type") or ""),
+                }
+            )
+
+        ticks.sort(key=lambda item: item["time"])
+        return ticks
+
+    def _rebuild_snapshot_from_ticks(self, symbol: str) -> None:
+        ticks = intraday_cache.get(symbol, [])
+        if not ticks:
+            return
+
+        today = datetime.now(tz=VN_TZ).date()
+        todays_ticks = [
+            tick for tick in ticks
+            if _to_date(tick.get("time")) == today
+        ]
+        target_ticks = todays_ticks or ticks
+        if not target_ticks:
+            return
+
+        open_price = _to_float(target_ticks[0].get("price"))
+        close_price = _to_float(target_ticks[-1].get("price"), fallback=open_price)
+        high_price = max(_to_float(tick.get("price")) for tick in target_ticks)
+        low_price = min(_to_float(tick.get("price")) for tick in target_ticks)
+        total_volume = sum(_to_int(tick.get("volume")) for tick in target_ticks)
+
+        previous_ref = _to_float(latest_snapshot_cache.get(symbol, {}).get("refPrice"), fallback=open_price)
+        if previous_ref <= 0:
+            previous_ref = open_price
+
+        change = close_price - previous_ref
+        change_percent = (change / previous_ref * 100.0) if previous_ref > 0 else 0.0
+
+        latest_snapshot_cache[symbol] = {
+            "symbol": symbol,
+            "companyName": symbol,
+            "price": close_price,
+            "change": round(change, 4),
+            "changePercent": round(change_percent, 4),
+            "volume": total_volume,
+            "high": high_price,
+            "low": low_price,
+            "open": open_price,
+            "refPrice": previous_ref,
+            "lastUpdate": target_ticks[-1].get("time") or datetime.now(tz=VN_TZ).isoformat(),
+            "syncedAt": datetime.now(tz=VN_TZ).isoformat(),
+        }
+
+    def _merge_ticks_no_lock(self, symbol: str, ticks: List[Dict[str, Any]]) -> int:
+        if not ticks:
+            return 0
+
+        cache = intraday_cache[symbol]
+        known = self._known_tick_ids[symbol]
+        added = 0
+
+        for tick in ticks:
+            key = self._tick_key(tick)
+            if key in known:
+                continue
+            known.add(key)
+            cache.append(tick)
+            added += 1
+
+        if added > 0:
+            cache.sort(key=lambda item: item["time"])
+
+            if len(cache) > self.max_ticks_per_symbol:
+                del cache[:-self.max_ticks_per_symbol]
+
+            self._known_tick_ids[symbol] = {self._tick_key(item) for item in cache}
+            self._rebuild_snapshot_from_ticks(symbol)
+            self.last_intraday_sync_at = datetime.now(tz=VN_TZ).isoformat()
+
+        return added
+
+    async def refresh_symbol_intraday(self, symbol: str, ignore_session: bool = False) -> bool:
+        normalized = normalize_symbol(symbol)
+        if not is_vn30_symbol(normalized):
+            return False
+
+        if not ignore_session and not self.is_intraday_fetch_window():
+            return False
+
+        await self._respect_rate_limit()
+        try:
+            frame = await asyncio.to_thread(self._fetch_intraday_sync, normalized)
+            ticks = self._normalize_intraday_rows(normalized, frame)
+            if not ticks:
+                return False
+
+            async with self._cache_lock:
+                return self._merge_ticks_no_lock(normalized, ticks) > 0
+        except BaseException as exc:
+            logger.warning("Failed intraday fetch for %s: %s", normalized, exc)
+            return False
+
+    async def refresh_symbols_once(self, symbols: List[str], ignore_session: bool = False) -> int:
+        updated = 0
+        for symbol in symbols:
+            if self._stop_event.is_set():
+                break
+            changed = await self.refresh_symbol_intraday(symbol, ignore_session=ignore_session)
+            if changed:
+                updated += 1
+        return updated
+
+    async def fetch_loop(self) -> None:
+        self._stop_event.clear()
+        self.is_running = True
+        logger.info("Started VN30 intraday fetch loop (source=%s)", self.quote_source)
+        in_session_last_cycle = False
+
+        try:
+            while not self._stop_event.is_set():
+                in_session_now = self.is_intraday_fetch_window()
+                if not in_session_now:
+                    if in_session_last_cycle:
+                        logger.info("Outside trading session. Pause intraday polling.")
+                        in_session_last_cycle = False
+
+                    sleep_seconds = min(
+                        self._seconds_until_next_intraday_window(),
+                        float(OUT_OF_SESSION_POLL_SECONDS),
+                    )
+                    try:
+                        await asyncio.wait_for(self._stop_event.wait(), timeout=sleep_seconds)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+
+                if not in_session_last_cycle:
+                    logger.info("Entered trading session. Resume intraday polling.")
+                    in_session_last_cycle = True
+
+                await self.refresh_symbols_once(VN30_SYMBOLS)
+        finally:
+            self.is_running = False
+            logger.info("Stopped VN30 intraday fetch loop")
+
+    def _normalize_history_rows(self, frame: Optional[pd.DataFrame]) -> List[Dict[str, Any]]:
+        if frame is None or frame.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for raw in frame.to_dict("records"):
+            row_date = _to_date(raw.get("time"))
+            if row_date is None:
+                continue
+
+            rows.append(
+                {
+                    "date": row_date,
+                    "open": _to_float(raw.get("open")),
+                    "high": _to_float(raw.get("high")),
+                    "low": _to_float(raw.get("low")),
+                    "close": _to_float(raw.get("close")),
+                    "volume": _to_int(raw.get("volume")),
+                }
+            )
+
+        rows.sort(key=lambda item: item["date"])
+        return rows
+
+    def _upsert_daily_rows_sync(self, symbol: str, rows: List[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+
+        db = SessionLocal()
+        try:
+            min_date = rows[0]["date"]
+            max_date = rows[-1]["date"]
+            existing_rows = (
+                db.query(DailyOHLCV)
+                .filter(DailyOHLCV.symbol == symbol)
+                .filter(DailyOHLCV.date >= min_date)
+                .filter(DailyOHLCV.date <= max_date)
+                .all()
+            )
+            by_date = {row.date: row for row in existing_rows}
+
+            affected = 0
+            for row in rows:
+                current = by_date.get(row["date"])
+                if current is None:
+                    current = DailyOHLCV(symbol=symbol, date=row["date"])
+                    db.add(current)
+
+                current.open = row["open"]
+                current.high = row["high"]
+                current.low = row["low"]
+                current.close = row["close"]
+                current.volume = row["volume"]
+                affected += 1
+
+            db.commit()
+            return affected
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    async def refresh_history_for_symbol(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        lookback_days: Optional[int] = None,
+    ) -> int:
+        normalized = normalize_symbol(symbol)
+        if not is_vn30_symbol(normalized):
+            return 0
+
+        safe_end = end_date or datetime.now(tz=VN_TZ).date()
+        lookback = max(lookback_days or self.default_history_lookback_days, 7)
+        safe_start = start_date or (safe_end - timedelta(days=lookback))
+        if safe_start > safe_end:
+            safe_start, safe_end = safe_end, safe_start
+
+        await self._respect_rate_limit()
+        try:
+            frame = await asyncio.to_thread(
+                self._fetch_history_sync,
+                normalized,
+                safe_start.isoformat(),
+                safe_end.isoformat(),
+            )
+            rows = self._normalize_history_rows(frame)
+            if not rows:
+                return 0
+
+            affected = await asyncio.to_thread(self._upsert_daily_rows_sync, normalized, rows)
+            self.last_history_sync_at[normalized] = datetime.now(tz=VN_TZ).isoformat()
+            return affected
+        except BaseException as exc:
+            logger.warning("Failed history sync for %s: %s", normalized, exc)
+            return 0
+
+    async def preload_historical_data(self, symbols: Optional[List[str]] = None) -> None:
+        target_symbols = symbols or VN30_SYMBOLS
+        logger.info("Starting historical preload for %s symbols", len(target_symbols))
+        for symbol in target_symbols:
+            if self._stop_event.is_set():
+                break
+            await self.refresh_history_for_symbol(symbol)
+        logger.info("Finished historical preload")
+
+    def load_history_from_db(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        limit: int = 365,
+    ) -> List[Dict[str, Any]]:
+        normalized = normalize_symbol(symbol)
+        if not is_vn30_symbol(normalized):
+            return []
+
+        safe_limit = max(limit, 1)
+        db = SessionLocal()
+        try:
+            query = db.query(DailyOHLCV).filter(DailyOHLCV.symbol == normalized)
+            if start_date:
+                query = query.filter(DailyOHLCV.date >= start_date)
+            if end_date:
+                query = query.filter(DailyOHLCV.date <= end_date)
+
+            records = query.order_by(DailyOHLCV.date.desc()).limit(safe_limit).all()
+            records = list(reversed(records))
+            return [
+                {
+                    "time": item.date.isoformat(),
+                    "open": float(item.open),
+                    "high": float(item.high),
+                    "low": float(item.low),
+                    "close": float(item.close),
+                    "volume": int(item.volume),
+                }
+                for item in records
+            ]
+        finally:
+            db.close()
+
+    async def ingest_realtime_quotes(self, quotes: List[Dict[str, Any]]) -> int:
+        saved = 0
+        async with self._cache_lock:
+            for quote in quotes:
+                symbol = normalize_symbol(str(quote.get("symbol", "")))
+                if not is_vn30_symbol(symbol):
+                    continue
+
+                price = _to_float(quote.get("price"))
+                if price <= 0:
+                    continue
+
+                tick = {
+                    "id": f"manual|{symbol}|{quote.get('time')}|{price}|{quote.get('volume')}",
+                    "symbol": symbol,
+                    "time": _to_iso_time(quote.get("time")),
+                    "price": price,
+                    "volume": _to_int(quote.get("volume")),
+                    "match_type": "manual",
+                }
+
+                self._merge_ticks_no_lock(symbol, [tick])
+
+                snapshot = latest_snapshot_cache.get(symbol, _empty_snapshot(symbol))
+                snapshot["price"] = price
+                snapshot["change"] = _to_float(quote.get("change"), fallback=snapshot.get("change", 0.0))
+                snapshot["changePercent"] = _to_float(
+                    quote.get("changePercent"),
+                    fallback=snapshot.get("changePercent", 0.0),
+                )
+                snapshot["high"] = _to_float(quote.get("high"), fallback=snapshot.get("high", price))
+                snapshot["low"] = _to_float(quote.get("low"), fallback=snapshot.get("low", price))
+                snapshot["open"] = _to_float(quote.get("open"), fallback=snapshot.get("open", price))
+                snapshot["volume"] = _to_int(quote.get("volume"), fallback=snapshot.get("volume", 0))
+                snapshot["lastUpdate"] = tick["time"]
+                snapshot["syncedAt"] = datetime.now(tz=VN_TZ).isoformat()
+                if _to_float(snapshot.get("refPrice")) <= 0:
+                    snapshot["refPrice"] = snapshot["open"]
+                latest_snapshot_cache[symbol] = snapshot
+
+                saved += 1
+
+        if saved > 0:
+            self.last_intraday_sync_at = datetime.now(tz=VN_TZ).isoformat()
+        return saved
+
+    def get_snapshot(self, symbol: str) -> Dict[str, Any]:
+        normalized = normalize_symbol(symbol)
+        if not is_vn30_symbol(normalized):
+            return _empty_snapshot(normalized or "UNKNOWN")
+
+        snapshot = dict(latest_snapshot_cache.get(normalized, _empty_snapshot(normalized)))
+        if _to_float(snapshot.get("price")) <= 0:
+            history = self.load_history_from_db(normalized, limit=2)
+            if history:
+                latest = history[-1]
+                previous = history[-2] if len(history) > 1 else latest
+
+                close_price = _to_float(latest.get("close"))
+                ref_price = _to_float(previous.get("close"), fallback=_to_float(latest.get("open"), fallback=close_price))
+                if ref_price <= 0:
+                    ref_price = close_price
+
+                change = close_price - ref_price
+                change_percent = (change / ref_price * 100.0) if ref_price > 0 else 0.0
+                snapshot.update(
+                    {
+                        "price": close_price,
+                        "change": round(change, 4),
+                        "changePercent": round(change_percent, 4),
+                        "high": _to_float(latest.get("high"), fallback=close_price),
+                        "low": _to_float(latest.get("low"), fallback=close_price),
+                        "open": _to_float(latest.get("open"), fallback=close_price),
+                        "refPrice": ref_price,
+                        "volume": _to_int(latest.get("volume")),
+                        "lastUpdate": str(latest.get("time")),
+                        "syncedAt": self.last_history_sync_at.get(normalized),
+                    }
+                )
+
+        return snapshot
+
+    def get_snapshots(self, symbols: List[str]) -> List[Dict[str, Any]]:
+        normalized_symbols = [symbol for symbol in parse_symbols_query(",".join(symbols), fallback=VN30_SYMBOLS)]
+        return [self.get_snapshot(symbol) for symbol in normalized_symbols]
+
+    def get_intraday_cache_view(self, symbols: Optional[List[str]] = None, limit: int = 120) -> Dict[str, List[Dict[str, Any]]]:
+        target_symbols = symbols or VN30_SYMBOLS
+        output: Dict[str, List[Dict[str, Any]]] = {}
+
+        for symbol in target_symbols:
+            normalized = normalize_symbol(symbol)
+            if not is_vn30_symbol(normalized):
+                continue
+
+            source = intraday_cache.get(normalized, [])
+            clipped = source[-max(limit, 1):]
+            output[normalized] = list(reversed([dict(item) for item in clipped]))
+
+        return output
+
+    def aggregate_today_intraday_to_daily(self) -> int:
+        today = datetime.now(tz=VN_TZ).date()
+        db = SessionLocal()
+        affected = 0
+
+        try:
+            for symbol in VN30_SYMBOLS:
+                ticks = [
+                    tick for tick in intraday_cache.get(symbol, [])
+                    if _to_date(tick.get("time")) == today
+                ]
+                if not ticks:
+                    continue
+
+                ticks.sort(key=lambda item: item.get("time", ""))
+                prices = [_to_float(tick.get("price")) for tick in ticks if _to_float(tick.get("price")) > 0]
+                if not prices:
+                    continue
+
+                open_price = prices[0]
+                close_price = prices[-1]
+                high_price = max(prices)
+                low_price = min(prices)
+                volume = sum(_to_int(tick.get("volume")) for tick in ticks)
+
+                current = db.query(DailyOHLCV).filter_by(symbol=symbol, date=today).first()
+                if current is None:
+                    current = DailyOHLCV(symbol=symbol, date=today)
+                    db.add(current)
+
+                current.open = open_price
+                current.high = high_price
+                current.low = low_price
+                current.close = close_price
+                current.volume = volume
+                affected += 1
+
+            db.commit()
+            return affected
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.is_running = False
+
+
+# Global singleton instance
+fetcher_service = VnstockFetcherService()
