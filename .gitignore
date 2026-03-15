@@ -28,4 +28,8 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+
+# Old backends and guides (not needed in repo)
+legacy/
+vnstock-agent-guide/
 .vercel
