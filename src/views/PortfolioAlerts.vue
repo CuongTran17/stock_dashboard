@@ -2,23 +2,23 @@
   <AdminLayout>
     <div class="space-y-6">
       <div class="flex flex-col gap-2">
-        <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">Portfolio & Alerts</h1>
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">Danh mục và cảnh báo</h1>
         <p class="text-sm text-gray-500 dark:text-gray-400">
-          Track your positions and monitor price targets in real time.
+          Theo dõi vị thế và mức giá mục tiêu theo thời gian thực.
         </p>
       </div>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Total Market Value</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Tổng giá trị thị trường</p>
           <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ formatCurrency(summary.totalValue) }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Total Cost</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Tổng giá vốn</p>
           <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ formatCurrency(summary.totalCost) }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Unrealized PnL</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Lãi lỗ tạm tính</p>
           <p
             class="mt-2 text-2xl font-semibold"
             :class="summary.totalPnl >= 0 ? 'text-success-600' : 'text-error-600'"
@@ -29,18 +29,18 @@
       </div>
 
       <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-        <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Positions</h2>
+        <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Vị thế</h2>
 
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Quantity</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Avg Price</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Current Price</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Market Value</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">PnL</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Mã</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Số lượng</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Giá vốn</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Giá hiện tại</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Giá trị thị trường</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Lãi/Lỗ</th>
               </tr>
             </thead>
             <tbody>
@@ -68,34 +68,34 @@
 
       <div class="grid grid-cols-12 gap-4 md:gap-6">
         <section class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-7">
-          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Price Alerts</h2>
+          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Cảnh báo giá</h2>
 
           <form class="grid grid-cols-1 gap-3 md:grid-cols-4" @submit.prevent="addAlert">
             <input
               v-model="newAlert.symbol"
               type="text"
-              placeholder="Symbol"
+              placeholder="Mã cổ phiếu"
               class="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700"
             />
             <select
               v-model="newAlert.direction"
               class="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700"
             >
-              <option value="above">Above</option>
-              <option value="below">Below</option>
+              <option value="above">Lớn hơn</option>
+              <option value="below">Nhỏ hơn</option>
             </select>
             <input
               v-model.number="newAlert.targetPrice"
               type="number"
               min="0"
-              placeholder="Target price"
+              placeholder="Giá mục tiêu"
               class="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700"
             />
             <button
               type="submit"
               class="h-10 rounded-lg bg-brand-500 px-3 text-sm font-medium text-white hover:bg-brand-600"
             >
-              Add Alert
+              Thêm cảnh báo
             </button>
           </form>
 
@@ -120,13 +120,13 @@
                       : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
                   "
                 >
-                  {{ isTriggered(alert) ? 'Triggered' : 'Watching' }}
+                  {{ isTriggered(alert) ? 'Đã kích hoạt' : 'Đang theo dõi' }}
                 </span>
                 <button
                   class="text-xs font-medium text-error-600"
                   @click="removeAlert(alert.id)"
                 >
-                  Remove
+                  Xóa
                 </button>
               </div>
             </div>
@@ -134,10 +134,10 @@
         </section>
 
         <section class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-5">
-          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Triggered Alerts</h2>
+          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Cảnh báo đã kích hoạt</h2>
 
           <div v-if="triggeredAlerts.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
-            No active triggers at the moment.
+            Hiện tại chưa có cảnh báo nào đủ điều kiện.
           </div>
 
           <ul v-else class="space-y-2">
@@ -146,9 +146,9 @@
               :key="`triggered-${alert.id}`"
               class="rounded-lg bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/10 dark:text-warning-400"
             >
-              {{ alert.symbol }} crossed
-              {{ alert.direction === 'above' ? 'above' : 'below' }} {{ formatPrice(alert.targetPrice) }}
-              (current: {{ formatPrice(currentPriceMap[alert.symbol] || 0) }})
+              {{ alert.symbol }} đã vượt
+              {{ alert.direction === 'above' ? 'lên trên' : 'xuống dưới' }} {{ formatPrice(alert.targetPrice) }}
+              (hiện tại: {{ formatPrice(currentPriceMap[alert.symbol] || 0) }})
             </li>
           </ul>
         </section>

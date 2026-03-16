@@ -2,23 +2,23 @@
   <AdminLayout>
     <div class="space-y-6">
       <div class="flex flex-col gap-2">
-        <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">News & Events</h1>
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">Tin tức và sự kiện</h1>
         <p class="text-sm text-gray-500 dark:text-gray-400">
-          Curated market headlines, corporate events, and live movers.
+          Tổng hợp tiêu đề thị trường, sự kiện doanh nghiệp và các mã biến động mạnh.
         </p>
       </div>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Headlines Today</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Tin nổi bật hôm nay</p>
           <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ newsFeed.length }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Upcoming Events</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Sự kiện sắp tới</p>
           <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ events.length }}</p>
         </div>
         <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">High Impact</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Mức tác động cao</p>
           <p class="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ highImpactCount }}</p>
         </div>
       </div>
@@ -26,7 +26,7 @@
       <div class="grid grid-cols-12 gap-4 md:gap-6">
         <section class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-8">
           <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Market News</h2>
+            <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tin thị trường</h2>
             <div class="inline-flex w-fit items-center gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
               <button
                 v-for="option in impactOptions"
@@ -39,7 +39,7 @@
                 "
                 @click="selectedImpact = option"
               >
-                {{ option }}
+                  {{ impactLabel(option) }}
               </button>
             </div>
           </div>
@@ -55,7 +55,7 @@
                   class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
                   :class="impactClass(item.impact)"
                 >
-                  {{ item.impact }}
+                  {{ impactLabel(item.impact) }}
                 </span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ item.source }} • {{ item.time }}</span>
               </div>
@@ -83,7 +83,7 @@
 
         <section class="col-span-12 space-y-4 xl:col-span-4">
           <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Top Movers</h2>
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Mã biến động mạnh</h2>
             <ul class="space-y-2">
               <li
                 v-for="stock in topMovers"
@@ -104,7 +104,7 @@
           </div>
 
           <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Upcoming Events</h2>
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Sự kiện sắp tới</h2>
             <ul v-if="events.length > 0" class="space-y-3">
               <li
                 v-for="event in events"
@@ -236,11 +236,18 @@ async function loadNewsAndEvents(): Promise<void> {
     events.value = eventsResult.value.data.map((item, index) => ({
       id: item.id || `${item.symbol}-event-${index}`,
       date: item.date || '',
-      title: item.title || 'Corporate Event',
-      description: item.description || 'Corporate event update.',
+      title: item.title || 'Sự kiện doanh nghiệp',
+      description: item.description || 'Cập nhật sự kiện doanh nghiệp.',
       symbol: item.symbol || 'VN30',
     }))
   }
+}
+
+function impactLabel(impact: (typeof impactOptions)[number]): string {
+  if (impact === 'All') return 'Tất cả'
+  if (impact === 'High') return 'Cao'
+  if (impact === 'Medium') return 'Trung bình'
+  return 'Thấp'
 }
 
 function impactClass(impact: ImpactLevel): string {

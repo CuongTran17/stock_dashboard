@@ -69,31 +69,31 @@
           Không có dữ liệu.
         </div>
 
-        <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <button
             v-for="stock in displayedStocks"
             :key="stock.symbol"
-            class="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-gray-800 dark:bg-white/[0.03]"
+            class="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-gray-800 dark:bg-white/[0.03]"
             @click="navigateToStock(stock.symbol)"
           >
             <div class="flex items-center gap-3">
               <div
-                class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
+                class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold text-white"
                 :style="{ backgroundColor: symbolColor(stock.symbol) }"
               >
                 {{ stock.symbol.charAt(0) }}
               </div>
               <div>
-                <p class="text-sm font-semibold text-gray-800 dark:text-white/90">{{ stock.symbol }}</p>
-                <p class="max-w-[100px] truncate text-xs text-gray-500 dark:text-gray-400">{{ stock.companyName || stock.symbol }}</p>
+                <p class="text-base font-semibold text-gray-800 dark:text-white/90">{{ stock.symbol }}</p>
+                <p class="max-w-[150px] truncate text-sm text-gray-500 dark:text-gray-400">{{ stock.companyName || stock.symbol }}</p>
               </div>
             </div>
             <div class="text-right">
-              <p class="text-sm font-semibold text-gray-800 dark:text-white/90">
+              <p class="text-base font-semibold text-gray-800 dark:text-white/90">
                 {{ formatPrice(stock.price) }}
               </p>
               <p
-                class="text-xs font-medium"
+                class="text-sm font-semibold"
                 :class="stock.changePercent >= 0 ? 'text-success-600' : 'text-error-600'"
               >
                 {{ stock.changePercent >= 0 ? '+' : '' }}{{ stock.changePercent.toFixed(2) }}%
@@ -108,9 +108,37 @@
         <PortfolioChart :symbol="selectedSymbol" />
       </div>
 
-      <!-- Dividend Chart -->
+      <!-- VNINDEX / VN30 quick cards -->
       <div class="col-span-12 xl:col-span-4">
-        <DividendChart />
+        <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+          <div class="mb-4 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Chỉ số nhanh</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Nhấn để xem chi tiết</p>
+          </div>
+
+          <div v-if="dashboardIndicesLoading" class="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            Đang tải VNINDEX và VN30...
+          </div>
+
+          <div v-else class="space-y-3">
+            <button
+              v-for="item in dashboardIndexCards"
+              :key="item.symbol"
+              class="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800/40"
+              @click="goToMarketOverview(item.symbol)"
+            >
+              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ item.name }}</p>
+              <p class="mt-1 text-2xl font-semibold text-gray-800 dark:text-white/90">{{ formatIndex(item.price) }}</p>
+              <p class="mt-1 text-sm font-semibold" :class="item.changePercent >= 0 ? 'text-success-600' : 'text-error-600'">
+                {{ item.changePercent >= 0 ? '+' : '' }}{{ item.changePercent.toFixed(2) }}%
+              </p>
+            </button>
+
+            <div v-if="dashboardIndexCards.length === 0" class="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              Chưa có dữ liệu chỉ số từ backend.
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- Watchlist -->
@@ -144,13 +172,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import PortfolioChart from '@/components/stock/PortfolioChart.vue'
-import DividendChart from '@/components/stock/DividendChart.vue'
 import StockWatchlist from '@/components/stock/StockWatchlist.vue'
 import MarketOverview from '@/components/stock/MarketOverview.vue'
 import ConnectionStatus from '@/components/stock/ConnectionStatus.vue'
 import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vue'
 import { useStockData, VN30_TICKERS } from '@/composables/useStockData'
-import { stockBackendApi, type StockSnapshot } from '@/services/stockBackendApi'
+import { stockBackendApi, type MarketIndexQuote, type StockSnapshot } from '@/services/stockBackendApi'
 
 const router = useRouter()
 
@@ -184,14 +211,14 @@ const topGainers = computed(() =>
   [...snapshots.value]
     .filter((s) => s.price > 0 && s.changePercent >= 0)
     .sort((a, b) => b.changePercent - a.changePercent)
-    .slice(0, 10),
+    .slice(0, 12),
 )
 
 const topLosers = computed(() =>
   [...snapshots.value]
     .filter((s) => s.price > 0 && s.changePercent < 0)
     .sort((a, b) => a.changePercent - b.changePercent)
-    .slice(0, 10),
+    .slice(0, 12),
 )
 
 const displayedStocks = computed(() =>
@@ -208,6 +235,35 @@ async function loadSnapshots(): Promise<void> {
   } finally {
     snapshotsLoading.value = false
   }
+}
+
+const dashboardIndicesLoading = ref(false)
+const dashboardIndices = ref<MarketIndexQuote[]>([])
+
+const dashboardIndexCards = computed(() => {
+  const preferred = ['VNINDEX', 'VN30']
+  return preferred
+    .map((symbol) => dashboardIndices.value.find((item) => String(item.symbol).toUpperCase() === symbol))
+    .filter((item): item is MarketIndexQuote => Boolean(item))
+})
+
+async function loadDashboardIndices(): Promise<void> {
+  dashboardIndicesLoading.value = true
+  try {
+    const response = await stockBackendApi.getMarketIndices(undefined, undefined, 8, false)
+    dashboardIndices.value = response.data
+  } catch {
+    dashboardIndices.value = []
+  } finally {
+    dashboardIndicesLoading.value = false
+  }
+}
+
+function goToMarketOverview(symbol: string): void {
+  void router.push({
+    path: '/market-overview',
+    query: { index: symbol },
+  })
 }
 
 function navigateToStock(symbol: string): void {
@@ -230,6 +286,12 @@ function symbolColor(symbol: string): string {
 
 function formatPrice(price: number): string {
   return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(price)
+}
+
+function formatIndex(value: number): string {
+  return new Intl.NumberFormat('vi-VN', {
+    maximumFractionDigits: 2,
+  }).format(value)
 }
 
 const allStocksArray = computed(() => {
@@ -263,7 +325,7 @@ function onSelectStock(symbol: string) {
 onMounted(async () => {
   // 1. Tải dữ liệu ban đầu từ REST API
   await fetchInitialData()
-  void loadSnapshots()
+  void Promise.all([loadSnapshots(), loadDashboardIndices()])
 
   // 2. Kết nối WebSocket cho real-time
   try {

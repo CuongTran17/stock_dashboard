@@ -3,7 +3,7 @@
     class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6"
   >
     <div class="flex items-center justify-between mb-5">
-      <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">My Watchlist</h3>
+      <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Danh mục theo dõi</h3>
 
       <div class="relative h-fit">
         <DropdownMenu :menu-items="menuItems">
@@ -122,8 +122,8 @@ const emit = defineEmits<{
 }>()
 
 const menuItems = [
-  { label: 'Sắp xếp theo giá', onClick: () => console.log('Sort by price') },
-  { label: 'Sắp xếp theo % thay đổi', onClick: () => console.log('Sort by change') },
+  { label: 'Sắp xếp theo giá', onClick: () => console.log('Sắp xếp theo giá') },
+  { label: 'Sắp xếp theo % thay đổi', onClick: () => console.log('Sắp xếp theo thay đổi') },
 ]
 
 const newSymbol = ref('')

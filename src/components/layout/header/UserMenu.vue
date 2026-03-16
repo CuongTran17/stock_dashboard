@@ -50,7 +50,7 @@
         <LogoutIcon
           class="text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300"
         />
-        Sign out
+        Đăng xuất
       </router-link>
     </div>
     <!-- Dropdown End -->
@@ -66,9 +66,9 @@ const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 
 const menuItems = [
-  { href: '/portfolio-alerts', icon: UserCircleIcon, text: 'My Portfolio' },
-  { href: '/screener', icon: SettingsIcon, text: 'Stock Screener' },
-  { href: '/news-events', icon: InfoCircleIcon, text: 'Market News' },
+  { href: '/portfolio-alerts', icon: UserCircleIcon, text: 'Danh mục của tôi' },
+  { href: '/screener', icon: SettingsIcon, text: 'Lọc cổ phiếu' },
+  { href: '/news-events', icon: InfoCircleIcon, text: 'Tin tức thị trường' },
 ]
 
 const toggleDropdown = () => {

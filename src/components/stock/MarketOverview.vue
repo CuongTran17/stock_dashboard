@@ -3,7 +3,7 @@
     class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6"
   >
     <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90 mb-5">
-      Market Overview
+      Tổng quan thị trường
     </h3>
 
     <div class="overflow-x-auto custom-scrollbar">

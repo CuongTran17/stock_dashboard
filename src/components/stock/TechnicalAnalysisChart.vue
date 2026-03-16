@@ -11,7 +11,7 @@
         <p v-if="signals" class="mt-1 text-sm text-gray-500 dark:text-gray-400">
           RSI: {{ signals.rsi }} · MACD: {{ signals.macd }}
           · SMA200: {{ signals.price_vs_sma200 }}
-          <span v-if="signals.golden_cross" class="text-amber-500 font-medium"> · Golden Cross ✦</span>
+          <span v-if="signals.golden_cross" class="text-amber-500 font-medium"> · Giao cắt vàng ✦</span>
         </p>
       </div>
 
@@ -69,7 +69,7 @@
     <div v-else class="space-y-4">
       <!-- Main Price Chart with Bollinger Bands + SMA -->
       <div class="max-w-full overflow-x-auto custom-scrollbar">
-        <div class="-ml-4 min-w-[700px] xl:min-w-full pl-2">
+        <div class="min-w-[700px] xl:min-w-full pl-3 pr-2">
           <VueApexCharts
             type="line"
             height="320"
@@ -81,7 +81,7 @@
 
       <!-- RSI Chart -->
       <div class="max-w-full overflow-x-auto custom-scrollbar">
-        <div class="-ml-4 min-w-[700px] xl:min-w-full pl-2">
+        <div class="min-w-[700px] xl:min-w-full pl-3 pr-2">
           <VueApexCharts
             type="line"
             height="160"
@@ -93,7 +93,7 @@
 
       <!-- MACD Chart -->
       <div class="max-w-full overflow-x-auto custom-scrollbar">
-        <div class="-ml-4 min-w-[700px] xl:min-w-full pl-2">
+        <div class="min-w-[700px] xl:min-w-full pl-3 pr-2">
           <VueApexCharts
             type="line"
             height="180"
@@ -268,8 +268,8 @@ const macdChartSeries = computed(() => {
   const { macd_line, macd_signal, macd_histogram } = taData.value.indicators
   return [
     { name: 'MACD', type: 'line', data: macd_line },
-    { name: 'Signal', type: 'line', data: macd_signal },
-    { name: 'Histogram', type: 'bar', data: macd_histogram },
+    { name: 'Đường tín hiệu', type: 'line', data: macd_signal },
+    { name: 'Cột dao động', type: 'bar', data: macd_histogram },
   ]
 })
 

@@ -2,16 +2,16 @@
   <AdminLayout>
     <div class="space-y-6">
       <div class="flex flex-col gap-2">
-        <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">Stock Screener</h1>
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">Lọc cổ phiếu</h1>
         <p class="text-sm text-gray-500 dark:text-gray-400">
-          Filter stocks by technical indicators (RSI, MACD) and fundamental metrics (P/E, P/B).
+          Lọc cổ phiếu theo chỉ báo kỹ thuật (RSI, MACD) và chỉ số định giá (P/E, P/B).
         </p>
       </div>
 
       <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
           <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Symbol / Name</span>
+            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Mã / Tên</span>
             <input
               v-model="searchKeyword"
               type="text"
@@ -21,7 +21,7 @@
           </label>
 
           <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">RSI Min</span>
+            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">RSI tối thiểu</span>
             <input
               v-model.number="rsiMin"
               type="number"
@@ -32,7 +32,7 @@
           </label>
 
           <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">RSI Max</span>
+            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">RSI tối đa</span>
             <input
               v-model.number="rsiMax"
               type="number"
@@ -43,7 +43,7 @@
           </label>
 
           <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Max P/E</span>
+            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">P/E tối đa</span>
             <input
               v-model.number="maxPe"
               type="number"
@@ -53,7 +53,7 @@
           </label>
 
           <label class="space-y-1">
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">Max P/B</span>
+            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">P/B tối đa</span>
             <input
               v-model.number="maxPb"
               type="number"
@@ -64,7 +64,7 @@
 
           <label class="flex items-end gap-2 pb-1">
             <input v-model="bullishMacdOnly" type="checkbox" class="h-4 w-4 rounded border-gray-300" />
-            <span class="text-sm text-gray-700 dark:text-gray-300">Bullish MACD only</span>
+            <span class="text-sm text-gray-700 dark:text-gray-300">Chỉ lấy MACD tăng</span>
           </label>
         </div>
 
@@ -73,39 +73,39 @@
             class="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600"
             @click="loadScreenerData"
           >
-            Refresh Scan
+            Quét lại
           </button>
           <button
             class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-300"
             @click="resetFilters"
           >
-            Reset Filters
+            Đặt lại bộ lọc
           </button>
         </div>
       </section>
 
       <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
         <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Results</h2>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ filteredRows.length }} matches</p>
+          <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Kết quả</h2>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ filteredRows.length }} mã phù hợp</p>
         </div>
 
-        <div v-if="loading" class="py-8 text-sm text-gray-500 dark:text-gray-400">Scanning market data...</div>
+        <div v-if="loading" class="py-8 text-sm text-gray-500 dark:text-gray-400">Đang quét dữ liệu thị trường...</div>
 
         <div v-else-if="filteredRows.length === 0" class="py-8 text-sm text-gray-500 dark:text-gray-400">
-          No stocks match current filters.
+          Không có cổ phiếu phù hợp bộ lọc hiện tại.
         </div>
 
         <div v-else class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Price</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Change</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Mã</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Giá</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Biến động</th>
                 <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">RSI</th>
                 <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">MACD</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Signal</th>
+                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Tín hiệu</th>
                 <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">P/E</th>
                 <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">P/B</th>
               </tr>
@@ -141,10 +141,10 @@
                           : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
                     "
                   >
-                    {{ row.macd }}
+                    {{ formatMacdLabel(row.macd) }}
                   </span>
                 </td>
-                <td class="px-3 py-2 text-gray-700 dark:text-gray-300">{{ row.signalSummary }}</td>
+                <td class="px-3 py-2 text-gray-700 dark:text-gray-300">{{ formatSignalSummary(row.signalSummary) }}</td>
                 <td class="px-3 py-2 text-gray-700 dark:text-gray-300">{{ formatMaybeNumber(row.pe) }}</td>
                 <td class="px-3 py-2 text-gray-700 dark:text-gray-300">{{ formatMaybeNumber(row.pb) }}</td>
               </tr>
@@ -251,6 +251,25 @@ function formatPrice(value: number): string {
 function formatMaybeNumber(value: number | null): string {
   if (value === null) return '-'
   return value.toFixed(2)
+}
+
+function formatMacdLabel(value: ScreenerRow['macd']): string {
+  if (value === 'bullish') return 'Tăng'
+  if (value === 'bearish') return 'Giảm'
+  return 'Không rõ'
+}
+
+function formatSignalSummary(value: ScreenerRow['signalSummary']): string {
+  const map: Record<string, string> = {
+    strong_buy: 'Mua mạnh',
+    buy: 'Mua',
+    neutral: 'Trung lập',
+    sell: 'Bán',
+    strong_sell: 'Bán mạnh',
+    '-': '-',
+  }
+
+  return map[value] ?? value
 }
 
 function goToDetail(symbol: string): void {

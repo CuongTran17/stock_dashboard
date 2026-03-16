@@ -235,7 +235,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import TradingViewChart from '@/components/stock/TradingViewChart.vue'
 import { VN30_TICKERS } from '@/composables/useStockData'
@@ -281,6 +281,7 @@ function timeframeToLimit(tf: string): number {
 }
 
 const router = useRouter()
+const route = useRoute()
 const marketIndices = ref<MarketIndexQuote[]>([])
 const marketStocks = ref<MarketStock[]>([])
 const activeIndexSymbol = ref<string>('VNINDEX')
@@ -494,6 +495,11 @@ async function refreshAll(forceRefresh: boolean): Promise<void> {
 }
 
 onMounted(async () => {
+  const requestedIndex = String(route.query.index || '').toUpperCase()
+  if (requestedIndex) {
+    activeIndexSymbol.value = requestedIndex
+  }
+
   await refreshAll(false)
   autoRefreshTimer = setInterval(() => {
     void refreshAll(false)

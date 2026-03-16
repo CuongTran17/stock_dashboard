@@ -7,7 +7,7 @@
       ]"
     ></div>
     <span class="text-xs text-gray-500 dark:text-gray-400">
-      {{ connected ? 'Live' : 'Offline' }}
+      {{ connected ? 'Trực tiếp' : 'Ngoại tuyến' }}
     </span>
     <span v-if="lastUpdate" class="text-xs text-gray-400 dark:text-gray-500">
       {{ formatTime(lastUpdate) }}

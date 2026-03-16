@@ -11,7 +11,7 @@ const router = createRouter({
       name: 'StockDashboard',
       component: () => import('../views/StockDashboard.vue'),
       meta: {
-        title: 'Stock Dashboard',
+        title: 'Bảng điều khiển cổ phiếu',
       },
     },
     {
@@ -19,7 +19,7 @@ const router = createRouter({
       name: 'MarketOverview',
       component: () => import('../views/MarketOverview.vue'),
       meta: {
-        title: 'Market Overview',
+        title: 'Tổng quan thị trường',
       },
     },
     {
@@ -27,7 +27,7 @@ const router = createRouter({
       name: 'StockDetail',
       component: () => import('../views/StockDetail.vue'),
       meta: {
-        title: 'Stock Detail',
+        title: 'Chi tiết cổ phiếu',
       },
     },
     {
@@ -35,7 +35,7 @@ const router = createRouter({
       name: 'StockScreener',
       component: () => import('../views/StockScreener.vue'),
       meta: {
-        title: 'Stock Screener',
+        title: 'Lọc cổ phiếu',
       },
     },
     {
@@ -43,7 +43,7 @@ const router = createRouter({
       name: 'PortfolioAlerts',
       component: () => import('../views/PortfolioAlerts.vue'),
       meta: {
-        title: 'Portfolio & Alerts',
+        title: 'Danh mục và cảnh báo',
       },
     },
     {
@@ -51,7 +51,7 @@ const router = createRouter({
       name: 'NewsEvents',
       component: () => import('../views/NewsEvents.vue'),
       meta: {
-        title: 'News & Events',
+        title: 'Tin tức và sự kiện',
       },
     },
     {
@@ -59,7 +59,7 @@ const router = createRouter({
       name: 'Signin',
       component: () => import('../views/Auth/Signin.vue'),
       meta: {
-        title: 'Signin',
+        title: 'Đăng nhập',
       },
     },
     {
@@ -67,14 +67,14 @@ const router = createRouter({
       name: 'Signup',
       component: () => import('../views/Auth/Signup.vue'),
       meta: {
-        title: 'Signup',
+        title: 'Đăng ký',
       },
     },
     {
       path: '/:pathMatch(.*)*',
       redirect: '/',
       meta: {
-        title: 'Stock Dashboard',
+        title: 'Bảng điều khiển cổ phiếu',
       },
     },
   ],
@@ -83,6 +83,6 @@ const router = createRouter({
 export default router
 
 router.beforeEach((to, from, next) => {
-  document.title = `${to.meta.title} | VN Stock Workstation`
+  document.title = `${to.meta.title} | The Fin1`
   next()
 })

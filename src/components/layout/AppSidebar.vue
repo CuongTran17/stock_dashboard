@@ -122,51 +122,51 @@ const { isExpanded, isMobileOpen, isHovered } = useSidebar()
 
 const menuGroups = [
   {
-    title: 'Market',
+    title: 'Thị trường',
     items: [
       {
         icon: StockChartIcon,
-        name: 'Stock Dashboard',
+        name: 'Bảng điều khiển',
         path: '/',
       },
       {
         icon: LayoutDashboardIcon,
-        name: 'Market Overview',
+        name: 'Tổng quan thị trường',
         path: '/market-overview',
       },
       {
         icon: BarChartIcon,
-        name: 'Stock Detail',
+        name: 'Chi tiết cổ phiếu',
         path: '/stocks/FPT',
       },
       {
         icon: ListIcon,
-        name: 'Stock Screener',
+        name: 'Lọc cổ phiếu',
         path: '/screener',
       },
       {
         icon: BellIcon,
-        name: 'Portfolio Alerts',
+        name: 'Cảnh báo danh mục',
         path: '/portfolio-alerts',
       },
       {
         icon: MailIcon,
-        name: 'News Events',
+        name: 'Tin tức và sự kiện',
         path: '/news-events',
       },
     ],
   },
   {
-    title: 'Authentication',
+    title: 'Tài khoản',
     items: [
       {
         icon: UserCircleIcon,
-        name: 'Sign in',
+        name: 'Đăng nhập',
         path: '/signin',
       },
       {
         icon: UserCircleIcon,
-        name: 'Sign up',
+        name: 'Đăng ký',
         path: '/signup',
       },
     ],

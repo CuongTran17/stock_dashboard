@@ -26,7 +26,7 @@
                   stroke-linejoin="round"
                 />
               </svg>
-              Back to dashboard
+              Quay lại bảng điều khiển
             </router-link>
           </div>
           <div class="flex flex-col justify-center flex-1 w-full max-w-md mx-auto">
@@ -35,10 +35,10 @@
                 <h1
                   class="mb-2 font-semibold text-gray-800 text-title-sm dark:text-white/90 sm:text-title-md"
                 >
-                  Sign In
+                  Đăng nhập
                 </h1>
                 <p class="text-sm text-gray-500 dark:text-gray-400">
-                  Enter your email and password to sign in!
+                  Nhập email và mật khẩu để đăng nhập!
                 </p>
               </div>
               <div>
@@ -70,7 +70,7 @@
                         fill="#EB4335"
                       />
                     </svg>
-                    Sign in with Google
+                    Đăng nhập với Google
                   </button>
                   <button
                     class="inline-flex items-center justify-center gap-3 py-3 text-sm font-normal text-gray-700 transition-colors bg-gray-100 rounded-lg px-7 hover:bg-gray-200 hover:text-gray-800 dark:bg-white/5 dark:text-white/90 dark:hover:bg-white/10"
@@ -88,7 +88,7 @@
                       />
                     </svg>
 
-                    Sign in with X
+                    Đăng nhập với X
                   </button>
                 </div>
                 <div class="relative py-3 sm:py-5">
@@ -97,7 +97,7 @@
                   </div>
                   <div class="relative flex justify-center text-sm">
                     <span class="p-2 text-gray-400 bg-white dark:bg-gray-900 sm:px-5 sm:py-2"
-                      >Or</span
+                      >Hoặc</span
                     >
                   </div>
                 </div>
@@ -126,14 +126,14 @@
                         for="password"
                         class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400"
                       >
-                        Password<span class="text-error-500">*</span>
+                        Mật khẩu<span class="text-error-500">*</span>
                       </label>
                       <div class="relative">
                         <input
                           v-model="password"
                           :type="showPassword ? 'text' : 'password'"
                           id="password"
-                          placeholder="Enter your password"
+                          placeholder="Nhập mật khẩu"
                           class="dark:bg-dark-900 h-11 w-full rounded-lg border border-gray-300 bg-transparent py-2.5 pl-4 pr-11 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800"
                         />
                         <span
@@ -216,13 +216,13 @@
                               </span>
                             </div>
                           </div>
-                          Keep me logged in
+                          Ghi nhớ đăng nhập
                         </label>
                       </div>
                       <router-link
                         to="/reset-password"
                         class="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                        >Forgot password?</router-link
+                        >Quên mật khẩu?</router-link
                       >
                     </div>
                     <!-- Button -->
@@ -231,7 +231,7 @@
                         type="submit"
                         class="flex items-center justify-center w-full px-4 py-3 text-sm font-medium text-white transition rounded-lg bg-brand-500 shadow-theme-xs hover:bg-brand-600"
                       >
-                        Sign In
+                        Đăng nhập
                       </button>
                     </div>
                   </div>
@@ -240,11 +240,11 @@
                   <p
                     class="text-sm font-normal text-center text-gray-700 dark:text-gray-400 sm:text-start"
                   >
-                    Don't have an account?
+                    Chưa có tài khoản?
                     <router-link
                       to="/signup"
                       class="text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                      >Sign Up</router-link
+                      >Đăng ký</router-link
                     >
                   </p>
                 </div>
@@ -262,7 +262,7 @@
                 <img width="{231}" height="{48}" src="/images/logo/auth-logo.svg" alt="Logo" />
               </router-link>
               <p class="text-center text-gray-400 dark:text-white/60">
-                Free and Open-Source Tailwind CSS Admin Dashboard Template
+                Nền tảng quản trị cổ phiếu The Fin1
               </p>
             </div>
           </div>
