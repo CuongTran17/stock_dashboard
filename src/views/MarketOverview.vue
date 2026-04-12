@@ -407,6 +407,7 @@ function heatColor(changePercent: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat('vi-VN', {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
 }

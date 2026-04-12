@@ -24,6 +24,7 @@ from src.database.models import (
     TechnicalCache,
 )
 from src.services.vnstock_fetcher import (
+    VN_TZ,
     VN30_SYMBOLS,
     fetcher_service,
     is_vn30_symbol,
@@ -73,6 +74,8 @@ FINANCIAL_METHODS: dict[str, str] = {
 
 MARKET_INDEX_HISTORY_TTL_SECONDS = max(int(os.getenv("VNSTOCK_MARKET_INDEX_CACHE_TTL_SECONDS", "180")), 30)
 MARKET_INDEX_LOOKBACK_DAYS = max(int(os.getenv("VNSTOCK_MARKET_INDEX_LOOKBACK_DAYS", "540")), 120)
+INTRADAY_STALE_SECONDS = max(int(os.getenv("VNSTOCK_INTRADAY_STALE_SECONDS", "20")), 3)
+INTRADAY_REFRESH_TIMEOUT_SECONDS = max(float(os.getenv("VNSTOCK_INTRADAY_REFRESH_TIMEOUT_SECONDS", "4.0")), 1.0)
 
 MARKET_INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
     "VNINDEX": {"name": "VN-Index", "vnstock_symbol": "VNINDEX"},
@@ -173,6 +176,99 @@ def _to_iso_date(value: Any) -> str:
     if parsed:
         return parsed.date().isoformat()
     return ""
+
+
+def _intraday_cache_age_seconds() -> Optional[float]:
+    last_sync = _parse_datetime(fetcher_service.last_intraday_sync_at)
+    if last_sync is None:
+        return None
+    return max((_utc_now() - last_sync).total_seconds(), 0.0)
+
+
+def _intraday_cache_is_stale(max_age_seconds: int = INTRADAY_STALE_SECONDS) -> bool:
+    age_seconds = _intraday_cache_age_seconds()
+    if age_seconds is None:
+        return True
+    return age_seconds > float(max(max_age_seconds, 1))
+
+
+async def _safe_refresh_symbols_once(symbols: list[str], ignore_session: bool = False) -> int:
+    try:
+        return await asyncio.wait_for(
+            fetcher_service.refresh_symbols_once(symbols, ignore_session=ignore_session),
+            timeout=INTRADAY_REFRESH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timed out refreshing symbols after %.1fs (symbols=%s)",
+            INTRADAY_REFRESH_TIMEOUT_SECONDS,
+            ",".join(symbols[:6]),
+        )
+        return 0
+    except Exception as exc:
+        logger.warning("Failed guarded refresh for symbols %s: %s", symbols[:6], exc)
+        return 0
+
+
+async def _safe_refresh_symbol(symbol: str, ignore_session: bool = False) -> bool:
+    try:
+        return await asyncio.wait_for(
+            fetcher_service.refresh_symbol_intraday(symbol, ignore_session=ignore_session),
+            timeout=INTRADAY_REFRESH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timed out refreshing symbol %s after %.1fs",
+            symbol,
+            INTRADAY_REFRESH_TIMEOUT_SECONDS,
+        )
+        return False
+    except Exception as exc:
+        logger.warning("Failed guarded refresh for symbol %s: %s", symbol, exc)
+        return False
+
+
+def _build_intraday_bars_from_ticks(
+    ticks: list[dict[str, Any]],
+    interval_minutes: int = 1,
+) -> list[dict[str, Any]]:
+    safe_interval = max(interval_minutes, 1)
+    bucket_seconds = safe_interval * 60
+
+    buckets: dict[int, dict[str, Any]] = {}
+    ordered_ticks = sorted(ticks, key=lambda item: str(item.get("time") or ""))
+    for tick in ordered_ticks:
+        price = _to_float(tick.get("price"))
+        if price <= 0:
+            continue
+
+        parsed_time = _parse_datetime(tick.get("time"))
+        if parsed_time is None:
+            continue
+
+        local_time = parsed_time.astimezone(VN_TZ)
+        bucket_epoch = int(local_time.timestamp()) // bucket_seconds * bucket_seconds
+        volume = _to_int(tick.get("volume"))
+
+        candle = buckets.get(bucket_epoch)
+        if candle is None:
+            bucket_time = datetime.fromtimestamp(bucket_epoch, tz=VN_TZ).replace(second=0, microsecond=0)
+            buckets[bucket_epoch] = {
+                "time": bucket_time.isoformat(),
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": volume,
+            }
+            continue
+
+        candle["high"] = max(_to_float(candle.get("high")), price)
+        candle["low"] = min(_to_float(candle.get("low"), fallback=price), price)
+        candle["close"] = price
+        candle["volume"] = _to_int(candle.get("volume")) + volume
+
+    return [buckets[key] for key in sorted(buckets.keys())]
 
 
 def _impact_from_price_change_pct(value: Any) -> str:
@@ -1286,8 +1382,12 @@ async def get_snapshots(
     refresh: bool = Query(default=False, description="Force refresh from vnstock before returning"),
 ) -> dict[str, Any]:
     target_symbols = parse_symbols_query(symbols, fallback=VN30_SYMBOLS)
-    if refresh:
-        await fetcher_service.refresh_symbols_once(target_symbols)
+    in_session = fetcher_service.is_intraday_fetch_window()
+    auto_refresh = in_session and _intraday_cache_is_stale()
+    should_refresh = refresh or auto_refresh
+
+    if should_refresh:
+        await _safe_refresh_symbols_once(target_symbols)
 
     snapshots = fetcher_service.get_snapshots(target_symbols)
     synced_candidates = [
@@ -1303,6 +1403,10 @@ async def get_snapshots(
         "cached_at": datetime.utcnow().isoformat(),
         "last_synced_at": latest_sync,
         "source": "vnstock-v2",
+        "refreshed": should_refresh,
+        "auto_refreshed": auto_refresh and not refresh,
+        "is_in_session": in_session,
+        "cache_age_seconds": _intraday_cache_age_seconds(),
     }
 
 
@@ -1425,6 +1529,87 @@ async def get_history(
         "data": records,
         "source": "mysql-history-refresh" if refresh else "mysql",
         "last_synced_at": fetcher_service.last_history_sync_at.get(normalized),
+    }
+
+
+@app.get("/api/stocks/{symbol}/intraday")
+async def get_intraday(
+    symbol: str,
+    limit: int = Query(default=320, ge=10, le=2000),
+    interval_minutes: int = Query(default=1, ge=1, le=30),
+    refresh: bool = Query(default=False, description="Force refresh intraday from vnstock before reading cache"),
+    force: bool = Query(default=False, description="Allow refresh outside trading session windows (debug)"),
+) -> dict[str, Any]:
+    normalized = _validate_vn30_symbol(symbol)
+    refreshed = False
+
+    if refresh:
+        refreshed = await _safe_refresh_symbol(normalized, ignore_session=force)
+
+    tick_window = min(max(limit * max(interval_minutes, 1) * 12, 600), 5000)
+    cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=tick_window)
+    ticks = cache_payload.get(normalized, [])
+    bars = _build_intraday_bars_from_ticks(ticks, interval_minutes=interval_minutes)
+
+    if len(bars) > limit:
+        bars = bars[-limit:]
+
+    return {
+        "symbol": normalized,
+        "count": len(bars),
+        "ticks_count": len(ticks),
+        "data": bars,
+        "interval_minutes": interval_minutes,
+        "source": "intraday-cache-refresh" if refresh else "intraday-cache",
+        "last_synced_at": fetcher_service.last_intraday_sync_at,
+        "is_in_session": fetcher_service.is_intraday_fetch_window(),
+        "refreshed": bool(refreshed),
+        "forced": force,
+    }
+
+
+@app.get("/api/stocks/{symbol}/ticks")
+async def get_ticks(
+    symbol: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+    refresh: bool = Query(default=False),
+    force: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Return raw intraday trade ticks (sổ lệnh — matched orders) for a symbol."""
+    normalized = _validate_vn30_symbol(symbol)
+    in_session = fetcher_service.is_intraday_fetch_window()
+    auto_refresh = in_session and _intraday_cache_is_stale()
+    refreshed = False
+
+    if refresh or auto_refresh:
+        refreshed = await _safe_refresh_symbol(normalized, ignore_session=force)
+
+    cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=limit)
+    ticks: list[dict] = cache_payload.get(normalized, [])
+
+    # Best-effort retry for in-session empty cache to reduce stale UI state.
+    if in_session and not ticks and not refreshed:
+        refreshed = await _safe_refresh_symbol(normalized, ignore_session=force)
+        cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=limit)
+        ticks = cache_payload.get(normalized, [])
+
+    # Return most-recent first for order log display.
+    ticks_desc = sorted(
+        ticks,
+        key=lambda item: _parse_datetime(item.get("time"))
+        or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    return {
+        "symbol": normalized,
+        "count": len(ticks_desc),
+        "ticks": ticks_desc,
+        "is_in_session": in_session,
+        "last_synced_at": fetcher_service.last_intraday_sync_at,
+        "refreshed": bool(refreshed),
+        "auto_refreshed": auto_refresh and not refresh,
+        "cache_age_seconds": _intraday_cache_age_seconds(),
     }
 
 
@@ -1666,6 +1851,32 @@ async def save_quotes(quotes: list[SaveQuotePayload]) -> dict[str, int]:
     payloads = [item.model_dump() for item in quotes]
     saved = await fetcher_service.ingest_realtime_quotes(payloads)
     return {"saved": saved}
+
+
+@app.post("/api/debug/intraday/refresh")
+async def debug_refresh_intraday(
+    symbols: Optional[str] = Query(default=None, description="Comma-separated VN30 symbols"),
+    force: bool = Query(default=True, description="Allow refresh outside trading session windows"),
+    cache_limit: int = Query(default=240, ge=1, le=2000),
+) -> dict[str, Any]:
+    target_symbols = parse_symbols_query(symbols, fallback=VN30_SYMBOLS)
+    updated = await fetcher_service.refresh_symbols_once(target_symbols, ignore_session=force)
+    cache_payload = fetcher_service.get_intraday_cache_view(symbols=target_symbols, limit=cache_limit)
+    per_symbol_tick_counts = {
+        symbol: len(cache_payload.get(symbol, []))
+        for symbol in target_symbols
+    }
+
+    return {
+        "count": len(target_symbols),
+        "symbols": target_symbols,
+        "updated_symbols": updated,
+        "forced": force,
+        "is_in_session": fetcher_service.is_intraday_fetch_window(),
+        "last_synced_at": fetcher_service.last_intraday_sync_at,
+        "total_ticks": sum(per_symbol_tick_counts.values()),
+        "per_symbol_tick_counts": per_symbol_tick_counts,
+    }
 
 
 @app.websocket("/api/ws/dnse")

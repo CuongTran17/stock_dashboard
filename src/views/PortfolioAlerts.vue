@@ -251,7 +251,8 @@ function isTriggered(alert: PriceAlert): boolean {
 
 function formatPrice(value: number): string {
   return new Intl.NumberFormat('vi-VN', {
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value)
 }
 

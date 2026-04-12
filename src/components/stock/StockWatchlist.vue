@@ -137,14 +137,9 @@ function addSymbol() {
 }
 
 function formatPrice(price: number): string {
-  if (price >= 1000) {
-    return new Intl.NumberFormat('vi-VN', {
-      style: 'currency',
-      currency: 'VND',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(price)
-  }
-  return new Intl.NumberFormat('vi-VN').format(price)
+  return new Intl.NumberFormat('vi-VN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(price)
 }
 </script>

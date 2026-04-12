@@ -15,11 +15,16 @@
 
             <div
               class="w-full rounded-xl border px-4 py-3 md:w-[240px] md:text-right"
-              :class="
+              :class="[
                 selectedStock && selectedStock.changePercent >= 0
                   ? 'border-success-200 bg-success-50 dark:border-success-700 dark:bg-success-500/15'
-                  : 'border-error-200 bg-error-50 dark:border-error-700 dark:bg-error-500/15'
-              "
+                  : 'border-error-200 bg-error-50 dark:border-error-700 dark:bg-error-500/15',
+                priceFlashDirection === 'up'
+                  ? 'price-flash-up'
+                  : priceFlashDirection === 'down'
+                    ? 'price-flash-down'
+                    : '',
+              ]"
             >
               <p
                 class="text-2xl font-extrabold leading-none"
@@ -111,13 +116,16 @@
         </section>
 
         <section
-          class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
+          class="col-span-12 flex flex-col rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
+          style="max-height: 480px"
         >
-          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Sổ lệnh</h2>
-
-          <div class="rounded-xl border border-dashed border-gray-200 px-3 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            Chưa có dữ liệu sổ lệnh từ backend.
-          </div>
+          <OrderLog
+            :ticks="orderTicks"
+            :total-count="orderTicksCount"
+            :is-in-session="orderIsInSession"
+            :loading="loadingOrderLog"
+            @refresh="loadOrderLog(true)"
+          />
         </section>
 
         <section class="col-span-12 xl:col-span-8">
@@ -223,18 +231,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import PortfolioChart from '@/components/stock/PortfolioChart.vue'
 import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vue'
 import TradingViewChart from '@/components/stock/TradingViewChart.vue'
+import OrderLog from '@/components/stock/OrderLog.vue'
 import { VN30_TICKERS, useStockData } from '@/composables/useStockData'
-import { stockBackendApi, type CompanyOverview } from '@/services/stockBackendApi'
+import { stockBackendApi, type CompanyOverview, type OrderTick } from '@/services/stockBackendApi'
 
 type FinancialType = 'income' | 'balance' | 'cashflow' | 'ratios'
 
 const CHART_TIMEFRAMES = [
+  { label: '1D', value: '1d' },
   { label: '1T', value: '1m' },
   { label: '3T', value: '3m' },
   { label: '6T', value: '6m' },
@@ -243,7 +253,11 @@ const CHART_TIMEFRAMES = [
 
 type ChartTimeframe = (typeof CHART_TIMEFRAMES)[number]['value']
 
-function timeframeToLimit(tf: ChartTimeframe | string): number {
+const ORDER_LOG_REFRESH_IN_SESSION_MS = 3000
+const ORDER_LOG_REFRESH_OUT_SESSION_MS = 15000
+
+function timeframeToLimit(tf: ChartTimeframe): number {
+  if (tf === '1d') return 2
   if (tf === '1m') return 30
   if (tf === '3m') return 90
   if (tf === '6m') return 180
@@ -273,15 +287,23 @@ const {
 } = useStockData()
 
 const historySeries = ref<HistoricalCandle[]>([])
-const chartTimeframe = ref<string>('1y')
+const chartTimeframe = ref<ChartTimeframe>('1d')
 const overview = ref<CompanyOverview | null>(null)
 const financialRows = ref<Record<string, unknown>[]>([])
+const orderTicks = ref<OrderTick[]>([])
+const orderTicksCount = ref(0)
+const orderIsInSession = ref(false)
+const loadingOrderLog = ref(false)
 const loadingOverview = ref(false)
 const loadingFinancials = ref(false)
 const manualRefreshing = ref(false)
 const technicalRefreshToken = ref(0)
 const activeReportType = ref<FinancialType>('income')
 const symbolPicker = ref('FPT')
+const priceFlashDirection = ref<'up' | 'down' | null>(null)
+const hasSeenFirstPriceForSymbol = ref(false)
+let priceFlashTimer: ReturnType<typeof setTimeout> | null = null
+let orderLogAutoRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
 const vn30Tickers = VN30_TICKERS
 
@@ -404,12 +426,6 @@ function formatLargeValue(value: number | null): string {
   return new Intl.NumberFormat('vi-VN').format(value)
 }
 
-function formatPrice(value: number): string {
-  return new Intl.NumberFormat('vi-VN', {
-    maximumFractionDigits: 0,
-  }).format(value)
-}
-
 function formatPriceWithDecimals(value: number): string {
   return new Intl.NumberFormat('vi-VN', {
     minimumFractionDigits: 2,
@@ -419,7 +435,7 @@ function formatPriceWithDecimals(value: number): string {
 
 function formatSignedChange(value: number): string {
   const sign = value > 0 ? '+' : ''
-  return `${sign}${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(value)}`
+  return `${sign}${new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}`
 }
 
 function formatColumnName(value: string): string {
@@ -517,10 +533,18 @@ async function loadFinancials(forceRefresh: boolean = false): Promise<void> {
   }
 }
 
-async function loadHistory(forceRefresh: boolean = false): Promise<void> {
-  const limit = timeframeToLimit(chartTimeframe.value)
+async function loadDailyHistory(
+  forceRefresh: boolean = false,
+  limitOverride?: number,
+): Promise<boolean> {
+  const limit = limitOverride ?? timeframeToLimit(chartTimeframe.value)
+
   try {
     const response = await stockBackendApi.getHistory(symbol.value, undefined, undefined, limit, forceRefresh)
+    if (response.data.length === 0) {
+      return false
+    }
+
     historySeries.value = response.data.map((item) => ({
       time: item.time,
       open: item.open,
@@ -529,7 +553,156 @@ async function loadHistory(forceRefresh: boolean = false): Promise<void> {
       close: item.close,
       volume: item.volume,
     }))
+    return true
   } catch {
+    return false
+  }
+}
+
+async function loadIntradayHistory(forceRefresh: boolean = false): Promise<boolean> {
+  try {
+    const response = await stockBackendApi.getIntraday(
+      symbol.value,
+      360,
+      forceRefresh,
+      forceRefresh,
+    )
+
+    if (response.data.length === 0) {
+      return false
+    }
+
+    historySeries.value = response.data.map((item) => ({
+      time: item.time,
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+      volume: item.volume,
+    }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function loadOrderLog(forceRefresh: boolean = false): Promise<void> {
+  loadingOrderLog.value = true
+  try {
+    const response = await stockBackendApi.getOrderLog(symbol.value, 100, forceRefresh, forceRefresh)
+    const sortedTicks = [...response.ticks].sort((a, b) => parseTickTimestamp(b.time) - parseTickTimestamp(a.time))
+
+    orderTicks.value = sortedTicks
+    orderTicksCount.value = response.count
+    orderIsInSession.value = response.is_in_session
+    syncPriceCardFromLatestTick(sortedTicks)
+  } catch {
+    orderTicks.value = []
+  } finally {
+    loadingOrderLog.value = false
+  }
+}
+
+function stopPriceFlash(): void {
+  if (priceFlashTimer) {
+    clearTimeout(priceFlashTimer)
+    priceFlashTimer = null
+  }
+
+  priceFlashDirection.value = null
+}
+
+async function triggerPriceFlash(direction: 'up' | 'down'): Promise<void> {
+  if (priceFlashTimer) {
+    clearTimeout(priceFlashTimer)
+    priceFlashTimer = null
+  }
+
+  priceFlashDirection.value = null
+  await nextTick()
+  priceFlashDirection.value = direction
+
+  priceFlashTimer = setTimeout(() => {
+    priceFlashDirection.value = null
+    priceFlashTimer = null
+  }, 520)
+}
+
+function parseTickTimestamp(isoTime: string): number {
+  const parsed = new Date(isoTime).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function syncPriceCardFromLatestTick(ticks: OrderTick[]): void {
+  const latestTick = ticks[0]
+  const symbolKey = symbol.value
+  const current = stocks[symbolKey]
+
+  if (!latestTick || !current) {
+    return
+  }
+
+  const latestTickTs = parseTickTimestamp(latestTick.time)
+  const currentTs = parseTickTimestamp(current.lastUpdate)
+  const hasNewerTick = latestTickTs > currentTs
+  const priceChanged = Math.abs(current.price - latestTick.price) > 1e-6
+
+  if (!hasNewerTick && !priceChanged) {
+    return
+  }
+
+  const fallbackRefPrice = (current.price - current.change) || latestTick.price
+  const refPrice = current.refPrice > 0 ? current.refPrice : fallbackRefPrice
+  const change = latestTick.price - refPrice
+  const changePercent = refPrice > 0 ? (change / refPrice) * 100 : current.changePercent
+
+  stocks[symbolKey] = {
+    ...current,
+    price: latestTick.price,
+    change,
+    changePercent,
+    lastUpdate: latestTick.time,
+  }
+}
+
+function stopOrderLogAutoRefresh(): void {
+  if (!orderLogAutoRefreshTimer) {
+    return
+  }
+
+  clearTimeout(orderLogAutoRefreshTimer)
+  orderLogAutoRefreshTimer = null
+}
+
+function scheduleOrderLogAutoRefresh(): void {
+  stopOrderLogAutoRefresh()
+
+  const refreshDelayMs = orderIsInSession.value
+    ? ORDER_LOG_REFRESH_IN_SESSION_MS
+    : ORDER_LOG_REFRESH_OUT_SESSION_MS
+
+  orderLogAutoRefreshTimer = setTimeout(async () => {
+    await loadOrderLog()
+    scheduleOrderLogAutoRefresh()
+  }, refreshDelayMs)
+}
+
+async function loadHistory(forceRefresh: boolean = false): Promise<void> {
+  if (chartTimeframe.value === '1d') {
+    const intradayLoaded = await loadIntradayHistory(forceRefresh)
+    if (intradayLoaded) {
+      return
+    }
+
+    const fallbackLoaded = await loadDailyHistory(forceRefresh, 3)
+    if (!fallbackLoaded) {
+      historySeries.value = []
+    }
+    return
+  }
+
+  const dailyLoaded = await loadDailyHistory(forceRefresh)
+  if (!dailyLoaded) {
     historySeries.value = []
   }
 }
@@ -541,6 +714,7 @@ async function reloadSymbolData(forceRefresh: boolean = false): Promise<void> {
     loadOverview(forceRefresh),
     loadFinancials(forceRefresh),
     loadHistory(forceRefresh),
+    loadOrderLog(forceRefresh),
   ])
 }
 
@@ -574,7 +748,34 @@ async function onRefreshClick(): Promise<void> {
 
 watch(symbol, (nextSymbol) => {
   symbolPicker.value = nextSymbol
+  hasSeenFirstPriceForSymbol.value = false
+  stopPriceFlash()
 }, { immediate: true })
+
+watch(
+  () => selectedStock.value?.price ?? null,
+  (nextPrice, prevPrice) => {
+    if (nextPrice === null || !Number.isFinite(nextPrice) || nextPrice <= 0) {
+      return
+    }
+
+    if (!hasSeenFirstPriceForSymbol.value) {
+      hasSeenFirstPriceForSymbol.value = true
+      return
+    }
+
+    if (prevPrice === null || !Number.isFinite(prevPrice)) {
+      return
+    }
+
+    const delta = nextPrice - prevPrice
+    if (Math.abs(delta) < 1e-6) {
+      return
+    }
+
+    void triggerPriceFlash(delta > 0 ? 'up' : 'down')
+  },
+)
 
 watch(symbol, () => {
   void reloadSymbolData()
@@ -587,6 +788,7 @@ watch(chartTimeframe, () => {
 onMounted(async () => {
   await fetchInitialData()
   await reloadSymbolData()
+  scheduleOrderLogAutoRefresh()
 
   try {
     connectRealtime()
@@ -596,6 +798,38 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopPriceFlash()
+  stopOrderLogAutoRefresh()
   cleanup()
 })
 </script>
+
+<style scoped>
+.price-flash-up {
+  animation: priceFlashUp 520ms ease-out;
+}
+
+.price-flash-down {
+  animation: priceFlashDown 520ms ease-out;
+}
+
+@keyframes priceFlashUp {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45), inset 0 0 0 999px rgba(34, 197, 94, 0.25);
+  }
+
+  100% {
+    box-shadow: 0 0 0 12px rgba(34, 197, 94, 0), inset 0 0 0 999px rgba(34, 197, 94, 0);
+  }
+}
+
+@keyframes priceFlashDown {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45), inset 0 0 0 999px rgba(239, 68, 68, 0.25);
+  }
+
+  100% {
+    box-shadow: 0 0 0 12px rgba(239, 68, 68, 0), inset 0 0 0 999px rgba(239, 68, 68, 0);
+  }
+}
+</style>

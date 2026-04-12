@@ -73,6 +73,33 @@ export interface HistoryResponse extends ApiMeta {
   data: HistoricalRecord[]
 }
 
+export interface IntradayResponse extends ApiMeta {
+  symbol: string
+  count: number
+  ticks_count: number
+  data: HistoricalRecord[]
+  is_in_session: boolean
+  refreshed: boolean
+  forced: boolean
+}
+
+export interface OrderTick {
+  id: string
+  symbol: string
+  time: string
+  price: number
+  volume: number
+  match_type: string
+}
+
+export interface TicksResponse extends ApiMeta {
+  symbol: string
+  count: number
+  ticks: OrderTick[]
+  is_in_session: boolean
+  refreshed: boolean
+}
+
 export interface FinancialsResponse extends ApiMeta {
   symbol: string
   type: 'income' | 'balance' | 'cashflow' | 'ratios'
@@ -239,6 +266,36 @@ class StockBackendApi {
     })
 
     return this.fetch<HistoryResponse>(`/api/stocks/${symbol.toUpperCase()}/history${query}`)
+  }
+
+  async getIntraday(
+    symbol: string,
+    limit: number = 320,
+    refresh: boolean = false,
+    force: boolean = false,
+  ): Promise<IntradayResponse> {
+    const query = this.buildQuery({
+      limit,
+      refresh: refresh || undefined,
+      force: force || undefined,
+    })
+
+    return this.fetch<IntradayResponse>(`/api/stocks/${symbol.toUpperCase()}/intraday${query}`)
+  }
+
+  async getOrderLog(
+    symbol: string,
+    limit: number = 100,
+    refresh: boolean = false,
+    force: boolean = false,
+  ): Promise<TicksResponse> {
+    const query = this.buildQuery({
+      limit,
+      refresh: refresh || undefined,
+      force: force || undefined,
+    })
+
+    return this.fetch<TicksResponse>(`/api/stocks/${symbol.toUpperCase()}/ticks${query}`)
   }
 
   async getTechnicalAnalysis(

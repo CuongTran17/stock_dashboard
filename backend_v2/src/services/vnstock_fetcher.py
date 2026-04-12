@@ -346,17 +346,31 @@ class VnstockFetcherService:
             return False
 
         await self._respect_rate_limit()
-        try:
-            frame = await asyncio.to_thread(self._fetch_intraday_sync, normalized)
-            ticks = self._normalize_intraday_rows(normalized, frame)
-            if not ticks:
+        for attempt in range(2):
+            try:
+                frame = await asyncio.to_thread(self._fetch_intraday_sync, normalized)
+                ticks = self._normalize_intraday_rows(normalized, frame)
+                if not ticks:
+                    logger.info("No intraday ticks returned for %s", normalized)
+                    return False
+
+                async with self._cache_lock:
+                    return self._merge_ticks_no_lock(normalized, ticks) > 0
+            except BaseException as exc:
+                if attempt == 0:
+                    logger.warning(
+                        "Transient intraday fetch failure for %s: %s (type=%s), retrying once",
+                        normalized,
+                        exc,
+                        type(exc).__name__,
+                    )
+                    await asyncio.sleep(0.35)
+                    continue
+
+                logger.error("Failed intraday fetch for %s: %s (type=%s)", normalized, exc, type(exc).__name__)
                 return False
 
-            async with self._cache_lock:
-                return self._merge_ticks_no_lock(normalized, ticks) > 0
-        except BaseException as exc:
-            logger.warning("Failed intraday fetch for %s: %s", normalized, exc)
-            return False
+        return False
 
     async def refresh_symbols_once(self, symbols: List[str], ignore_session: bool = False) -> int:
         updated = 0

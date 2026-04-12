@@ -145,7 +145,7 @@
       <div class="col-span-12 xl:col-span-4">
         <StockWatchlist
           :stocks="watchlistStocks"
-          @select="onSelectStock"
+          @select="navigateToStock"
           @add="addToWatchlist"
           @remove="removeFromWatchlist"
         />
@@ -153,7 +153,7 @@
 
       <!-- Market Overview Table -->
       <div class="col-span-12 xl:col-span-8">
-        <MarketOverview :stocks="allStocksArray" @select="onSelectStock" />
+        <MarketOverview :stocks="allStocksArray" @select="navigateToStock" />
       </div>
 
       <!-- Technical Analysis Chart (full width) -->
@@ -267,7 +267,10 @@ function goToMarketOverview(symbol: string): void {
 }
 
 function navigateToStock(symbol: string): void {
-  void router.push(`/stocks/${symbol}`)
+  void router.push({
+    name: 'StockDetail',
+    params: { symbol: symbol.toUpperCase() },
+  })
 }
 
 const SYMBOL_COLORS: Record<string, string> = {
@@ -285,11 +288,15 @@ function symbolColor(symbol: string): string {
 }
 
 function formatPrice(price: number): string {
-  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(price)
+  return new Intl.NumberFormat('vi-VN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(price)
 }
 
 function formatIndex(value: number): string {
   return new Intl.NumberFormat('vi-VN', {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)
 }
@@ -317,10 +324,6 @@ const formattedLastDataSync = computed(() => {
     second: '2-digit',
   })
 })
-
-function onSelectStock(symbol: string) {
-  selectedSymbol.value = symbol
-}
 
 onMounted(async () => {
   // 1. Tải dữ liệu ban đầu từ REST API

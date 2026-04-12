@@ -31,7 +31,7 @@ export const DEFAULT_WATCHLIST = ['FPT', 'VNM', 'VCB', 'HPG', 'MBB', 'TCB', 'VIC
 export const FEATURED_STOCKS = ['FPT', 'VNM', 'VCB', 'HPG']
 
 const ENABLE_REALTIME = import.meta.env.VITE_ENABLE_REALTIME === 'true'
-const DEFAULT_POLLING_MS = 60000
+const DEFAULT_POLLING_MS = 5000
 const pollingMsFromEnv = Number(import.meta.env.VITE_BACKEND_POLLING_MS || DEFAULT_POLLING_MS)
 const BACKEND_POLLING_MS = Number.isFinite(pollingMsFromEnv) && pollingMsFromEnv >= 5000
   ? pollingMsFromEnv

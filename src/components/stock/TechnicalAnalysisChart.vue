@@ -196,7 +196,10 @@ const priceChartOptions = computed(() => ({
     shared: true,
     y: {
       formatter: (val: number) =>
-        val != null ? new Intl.NumberFormat('vi-VN').format(Math.round(val)) + ' đ' : '-',
+        val != null ? new Intl.NumberFormat('vi-VN', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(val) + ' đ' : '-',
     },
   },
   xaxis: {
@@ -209,8 +212,10 @@ const priceChartOptions = computed(() => ({
   yaxis: {
     title: { text: 'Giá (VNĐ)', style: { fontSize: '11px' } },
     labels: {
-      formatter: (val: number) =>
-        val >= 1000 ? (val / 1000).toFixed(1) + 'k' : String(Math.round(val)),
+      formatter: (val: number) => new Intl.NumberFormat('vi-VN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(val),
     },
   },
 }))

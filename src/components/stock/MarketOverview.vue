@@ -90,10 +90,10 @@ defineEmits<{
 }>()
 
 function formatPrice(price: number): string {
-  if (Math.abs(price) >= 1000) {
-    return new Intl.NumberFormat('vi-VN').format(price)
-  }
-  return price.toFixed(0)
+  return new Intl.NumberFormat('vi-VN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(price)
 }
 
 function formatVolume(volume: number): string {

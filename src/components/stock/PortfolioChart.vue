@@ -129,12 +129,10 @@ const chartOptions = computed(() => ({
   tooltip: {
     x: { format: 'dd MMM yyyy' },
     y: {
-      formatter: (val: number) => {
-        if (val >= 1000) {
-          return new Intl.NumberFormat('vi-VN').format(val) + ' đ'
-        }
-        return val.toFixed(2)
-      },
+      formatter: (val: number) => new Intl.NumberFormat('vi-VN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(val) + ' đ',
     },
   },
   xaxis: {
