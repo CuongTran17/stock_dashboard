@@ -3,19 +3,17 @@ import json
 import logging
 import math
 import os
-from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 import pandas as pd
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import select, text
 from vnstock import Company, Finance, Quote
 
-from src.database.db import SessionLocal, init_db
+from src.database.db import AsyncSessionLocal, SessionLocal, init_db
 from src.database.models import (
     CompanyOverviewCache,
     EventsCache,
@@ -23,6 +21,8 @@ from src.database.models import (
     NewsCache,
     TechnicalCache,
 )
+from src.jobs import build_lifespan
+from src.services.fundamental_fetcher import fundamental_service
 from src.services.vnstock_fetcher import (
     VN_TZ,
     VN30_SYMBOLS,
@@ -386,10 +386,10 @@ def _row_is_fresh(updated_at: Any, ttl_seconds: int) -> bool:
     return (_utc_now() - parsed).total_seconds() < ttl_seconds
 
 
-def _load_symbol_payload_cache(model_cls: Any, symbol: str, max_age_seconds: Optional[int]) -> tuple[Optional[Any], Optional[str]]:
-    db = SessionLocal()
-    try:
-        row = db.query(model_cls).filter(model_cls.symbol == symbol).first()
+async def _load_symbol_payload_cache(model_cls: Any, symbol: str, max_age_seconds: Optional[int]) -> tuple[Optional[Any], Optional[str]]:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(model_cls).where(model_cls.symbol == symbol))
+        row = result.scalars().first()
         if not row:
             return None, None
 
@@ -398,47 +398,45 @@ def _load_symbol_payload_cache(model_cls: Any, symbol: str, max_age_seconds: Opt
 
         payload = _json_loads(row.payload_json, fallback=[])
         return payload, _row_iso_timestamp(row.updated_at)
-    finally:
-        db.close()
 
 
-def _save_symbol_payload_cache(model_cls: Any, symbol: str, payload: Any, source: str) -> Optional[str]:
-    db = SessionLocal()
-    try:
-        row = db.query(model_cls).filter(model_cls.symbol == symbol).first()
-        if row is None:
-            row = model_cls(symbol=symbol)
+async def _save_symbol_payload_cache(model_cls: Any, symbol: str, payload: Any, source: str) -> Optional[str]:
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(select(model_cls).where(model_cls.symbol == symbol))
+            row = result.scalars().first()
+            if row is None:
+                row = model_cls(symbol=symbol)
 
-        row.payload_json = _json_dumps(payload)
-        if hasattr(row, "item_count"):
-            row.item_count = len(payload) if isinstance(payload, list) else 0
-        if hasattr(row, "source"):
-            row.source = source
-        row.updated_at = datetime.utcnow()
+            row.payload_json = _json_dumps(payload)
+            if hasattr(row, "item_count"):
+                row.item_count = len(payload) if isinstance(payload, list) else 0
+            if hasattr(row, "source"):
+                row.source = source
+            row.updated_at = datetime.utcnow()
 
-        db.add(row)
-        db.commit()
-        return _row_iso_timestamp(row.updated_at)
-    except Exception as exc:
-        db.rollback()
-        logger.warning("Failed to save %s cache for %s: %s", model_cls.__name__, symbol, exc)
-        return None
-    finally:
-        db.close()
+            db.add(row)
+            await db.commit()
+            return _row_iso_timestamp(row.updated_at)
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Failed to save %s cache for %s: %s", model_cls.__name__, symbol, exc)
+            return None
 
 
-def _load_financial_report_cache(
+async def _load_financial_report_cache(
     symbol: str,
     report_type: str,
     max_age_seconds: Optional[int],
 ) -> tuple[Optional[list[dict[str, Any]]], Optional[str]]:
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(FinancialReportCache)
-            .filter(FinancialReportCache.symbol == symbol, FinancialReportCache.report_type == report_type)
-            .first()
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(FinancialReportCache).where(
+                FinancialReportCache.symbol == symbol,
+                FinancialReportCache.report_type == report_type,
+            )
         )
+        row = result.scalars().first()
         if not row:
             return None, None
 
@@ -449,40 +447,38 @@ def _load_financial_report_cache(
         if not isinstance(payload, list):
             payload = []
         return payload, _row_iso_timestamp(row.updated_at)
-    finally:
-        db.close()
 
 
-def _save_financial_report_cache(
+async def _save_financial_report_cache(
     symbol: str,
     report_type: str,
     records: list[dict[str, Any]],
     source: str,
 ) -> Optional[str]:
-    db = SessionLocal()
-    try:
-        row = (
-            db.query(FinancialReportCache)
-            .filter(FinancialReportCache.symbol == symbol, FinancialReportCache.report_type == report_type)
-            .first()
-        )
-        if row is None:
-            row = FinancialReportCache(symbol=symbol, report_type=report_type)
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(
+                select(FinancialReportCache).where(
+                    FinancialReportCache.symbol == symbol,
+                    FinancialReportCache.report_type == report_type,
+                )
+            )
+            row = result.scalars().first()
+            if row is None:
+                row = FinancialReportCache(symbol=symbol, report_type=report_type)
 
-        row.row_count = len(records)
-        row.payload_json = _json_dumps(records)
-        row.source = source
-        row.updated_at = datetime.utcnow()
+            row.row_count = len(records)
+            row.payload_json = _json_dumps(records)
+            row.source = source
+            row.updated_at = datetime.utcnow()
 
-        db.add(row)
-        db.commit()
-        return _row_iso_timestamp(row.updated_at)
-    except Exception as exc:
-        db.rollback()
-        logger.warning("Failed to save financial cache for %s (%s): %s", symbol, report_type, exc)
-        return None
-    finally:
-        db.close()
+            db.add(row)
+            await db.commit()
+            return _row_iso_timestamp(row.updated_at)
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Failed to save financial cache for %s (%s): %s", symbol, report_type, exc)
+            return None
 
 
 def _fetch_company_overview_sync(symbol: str) -> dict[str, Any]:
@@ -508,11 +504,11 @@ async def _refresh_company_overview(symbol: str) -> tuple[dict[str, Any], Option
     await fetcher_service.wait_for_rate_slot()
     try:
         payload = await asyncio.to_thread(_fetch_company_overview_sync, symbol)
-        synced_at = _save_symbol_payload_cache(CompanyOverviewCache, symbol, payload, source="vnstock-company-overview")
+        synced_at = await _save_symbol_payload_cache(CompanyOverviewCache, symbol, payload, source="vnstock-company-overview")
         return payload, synced_at
     except BaseException as exc:
         logger.warning("Failed to fetch company overview for %s: %s", symbol, exc)
-        payload, synced_at = _load_symbol_payload_cache(CompanyOverviewCache, symbol, max_age_seconds=None)
+        payload, synced_at = await _load_symbol_payload_cache(CompanyOverviewCache, symbol, max_age_seconds=None)
         return payload or {}, synced_at
 
 
@@ -520,11 +516,11 @@ async def _refresh_financial_report(symbol: str, report_type: str) -> tuple[list
     await fetcher_service.wait_for_rate_slot()
     try:
         records = await asyncio.to_thread(_fetch_financial_report_sync, symbol, report_type)
-        synced_at = _save_financial_report_cache(symbol, report_type, records, source=f"vnstock-finance-{report_type}")
+        synced_at = await _save_financial_report_cache(symbol, report_type, records, source=f"vnstock-finance-{report_type}")
         return records, synced_at
     except BaseException as exc:
         logger.warning("Failed to fetch financial report for %s (%s): %s", symbol, report_type, exc)
-        records, synced_at = _load_financial_report_cache(symbol, report_type, max_age_seconds=None)
+        records, synced_at = await _load_financial_report_cache(symbol, report_type, max_age_seconds=None)
         return records or [], synced_at
 
 
@@ -599,27 +595,30 @@ def _extract_valuation_from_ratios(records: list[dict[str, Any]]) -> dict[str, O
     }
 
 
-def _load_technical_cache(
+async def _load_technical_cache(
     symbol: str,
     start_date: Optional[date],
     end_date: Optional[date],
     limit: int,
 ) -> tuple[Optional[TechnicalCache], Optional[dict[str, Any]]]:
-    db = SessionLocal()
-    try:
-        query = db.query(TechnicalCache).filter(TechnicalCache.symbol == symbol, TechnicalCache.limit_value == limit)
+    async with AsyncSessionLocal() as db:
+        query = select(TechnicalCache).where(
+            TechnicalCache.symbol == symbol,
+            TechnicalCache.limit_value == limit,
+        )
 
         if start_date is None:
-            query = query.filter(TechnicalCache.start_date.is_(None))
+            query = query.where(TechnicalCache.start_date.is_(None))
         else:
-            query = query.filter(TechnicalCache.start_date == start_date)
+            query = query.where(TechnicalCache.start_date == start_date)
 
         if end_date is None:
-            query = query.filter(TechnicalCache.end_date.is_(None))
+            query = query.where(TechnicalCache.end_date.is_(None))
         else:
-            query = query.filter(TechnicalCache.end_date == end_date)
+            query = query.where(TechnicalCache.end_date == end_date)
 
-        row = query.first()
+        result = await db.execute(query)
+        row = result.scalars().first()
         if not row:
             return None, None
 
@@ -627,11 +626,9 @@ def _load_technical_cache(
         if not isinstance(payload, dict):
             payload = {}
         return row, payload
-    finally:
-        db.close()
 
 
-def _save_technical_cache(
+async def _save_technical_cache(
     symbol: str,
     start_date: Optional[date],
     end_date: Optional[date],
@@ -640,39 +637,41 @@ def _save_technical_cache(
     history_last_time: Optional[str],
     payload: dict[str, Any],
 ) -> Optional[str]:
-    db = SessionLocal()
-    try:
-        query = db.query(TechnicalCache).filter(TechnicalCache.symbol == symbol, TechnicalCache.limit_value == limit)
+    async with AsyncSessionLocal() as db:
+        try:
+            query = select(TechnicalCache).where(
+                TechnicalCache.symbol == symbol,
+                TechnicalCache.limit_value == limit,
+            )
 
-        if start_date is None:
-            query = query.filter(TechnicalCache.start_date.is_(None))
-        else:
-            query = query.filter(TechnicalCache.start_date == start_date)
+            if start_date is None:
+                query = query.where(TechnicalCache.start_date.is_(None))
+            else:
+                query = query.where(TechnicalCache.start_date == start_date)
 
-        if end_date is None:
-            query = query.filter(TechnicalCache.end_date.is_(None))
-        else:
-            query = query.filter(TechnicalCache.end_date == end_date)
+            if end_date is None:
+                query = query.where(TechnicalCache.end_date.is_(None))
+            else:
+                query = query.where(TechnicalCache.end_date == end_date)
 
-        row = query.first()
-        if row is None:
-            row = TechnicalCache(symbol=symbol, start_date=start_date, end_date=end_date, limit_value=limit)
+            result = await db.execute(query)
+            row = result.scalars().first()
+            if row is None:
+                row = TechnicalCache(symbol=symbol, start_date=start_date, end_date=end_date, limit_value=limit)
 
-        row.history_count = history_count
-        row.history_last_time = history_last_time
-        row.payload_json = _json_dumps(payload)
-        row.source = "mysql"
-        row.updated_at = datetime.utcnow()
+            row.history_count = history_count
+            row.history_last_time = history_last_time
+            row.payload_json = _json_dumps(payload)
+            row.source = "mysql"
+            row.updated_at = datetime.utcnow()
 
-        db.add(row)
-        db.commit()
-        return _row_iso_timestamp(row.updated_at)
-    except Exception as exc:
-        db.rollback()
-        logger.warning("Failed to save technical cache for %s: %s", symbol, exc)
-        return None
-    finally:
-        db.close()
+            db.add(row)
+            await db.commit()
+            return _row_iso_timestamp(row.updated_at)
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("Failed to save technical cache for %s: %s", symbol, exc)
+            return None
 
 
 def _fetch_symbol_news_sync(symbol: str) -> list[dict[str, Any]]:
@@ -765,7 +764,7 @@ async def _get_symbol_news(symbol: str, refresh: bool) -> tuple[list[dict[str, A
             return list(entry.get("items", [])), entry.get("updated_at", _utc_now()).isoformat()
 
     if not refresh:
-        cached_items, cached_synced_at = _load_symbol_payload_cache(
+        cached_items, cached_synced_at = await _load_symbol_payload_cache(
             NewsCache,
             normalized,
             max_age_seconds=None,
@@ -782,7 +781,7 @@ async def _get_symbol_news(symbol: str, refresh: bool) -> tuple[list[dict[str, A
         synced_at = _utc_now()
         async with _news_lock:
             _news_cache[normalized] = {"updated_at": synced_at, "items": items}
-        persisted_synced_at = _save_symbol_payload_cache(
+        persisted_synced_at = await _save_symbol_payload_cache(
             NewsCache,
             normalized,
             items,
@@ -796,7 +795,7 @@ async def _get_symbol_news(symbol: str, refresh: bool) -> tuple[list[dict[str, A
             if entry:
                 return list(entry.get("items", [])), entry.get("updated_at", _utc_now()).isoformat()
 
-        fallback_items, fallback_synced_at = _load_symbol_payload_cache(
+        fallback_items, fallback_synced_at = await _load_symbol_payload_cache(
             NewsCache,
             normalized,
             max_age_seconds=None,
@@ -814,7 +813,7 @@ async def _get_symbol_events(symbol: str, refresh: bool) -> tuple[list[dict[str,
             return list(entry.get("items", [])), entry.get("updated_at", _utc_now()).isoformat()
 
     if not refresh:
-        cached_items, cached_synced_at = _load_symbol_payload_cache(
+        cached_items, cached_synced_at = await _load_symbol_payload_cache(
             EventsCache,
             normalized,
             max_age_seconds=None,
@@ -831,7 +830,7 @@ async def _get_symbol_events(symbol: str, refresh: bool) -> tuple[list[dict[str,
         synced_at = _utc_now()
         async with _events_lock:
             _events_cache[normalized] = {"updated_at": synced_at, "items": items}
-        persisted_synced_at = _save_symbol_payload_cache(
+        persisted_synced_at = await _save_symbol_payload_cache(
             EventsCache,
             normalized,
             items,
@@ -845,7 +844,7 @@ async def _get_symbol_events(symbol: str, refresh: bool) -> tuple[list[dict[str,
             if entry:
                 return list(entry.get("items", [])), entry.get("updated_at", _utc_now()).isoformat()
 
-        fallback_items, fallback_synced_at = _load_symbol_payload_cache(
+        fallback_items, fallback_synced_at = await _load_symbol_payload_cache(
             EventsCache,
             normalized,
             max_age_seconds=None,
@@ -1177,35 +1176,35 @@ async def _preload_symbol_reference_cache(symbol: str, force_refresh: bool) -> N
 
     cached_overview: Any = None
     if not force_refresh:
-        cached_overview, _ = _load_symbol_payload_cache(CompanyOverviewCache, normalized, max_age_seconds=None)
+        cached_overview, _ = await _load_symbol_payload_cache(CompanyOverviewCache, normalized, max_age_seconds=None)
     if force_refresh or not _cache_has_content(cached_overview):
         await _refresh_company_overview(normalized)
 
     for report_type in FINANCIAL_METHODS:
         cached_rows: Any = None
         if not force_refresh:
-            cached_rows, _ = _load_financial_report_cache(normalized, report_type, max_age_seconds=None)
+            cached_rows, _ = await _load_financial_report_cache(normalized, report_type, max_age_seconds=None)
         if force_refresh or not _cache_has_content(cached_rows):
             await _refresh_financial_report(normalized, report_type)
 
     cached_news: Any = None
     if not force_refresh:
-        cached_news, _ = _load_symbol_payload_cache(NewsCache, normalized, max_age_seconds=None)
+        cached_news, _ = await _load_symbol_payload_cache(NewsCache, normalized, max_age_seconds=None)
     if force_refresh or not _cache_has_content(cached_news):
         await _get_symbol_news(normalized, refresh=True)
 
     cached_events: Any = None
     if not force_refresh:
-        cached_events, _ = _load_symbol_payload_cache(EventsCache, normalized, max_age_seconds=None)
+        cached_events, _ = await _load_symbol_payload_cache(EventsCache, normalized, max_age_seconds=None)
     if force_refresh or not _cache_has_content(cached_events):
         await _get_symbol_events(normalized, refresh=True)
 
-    cached_technical, _ = _load_technical_cache(normalized, start_date=None, end_date=None, limit=365)
+    cached_technical, _ = await _load_technical_cache(normalized, start_date=None, end_date=None, limit=365)
     if force_refresh or cached_technical is None:
-        records = fetcher_service.load_history_from_db(normalized, start_date=None, end_date=None, limit=365)
+        records = await fetcher_service.load_history_from_db_async(normalized, start_date=None, end_date=None, limit=365)
         if records:
             payload = _calculate_technical_payload(normalized, records)
-            _save_technical_cache(
+            await _save_technical_cache(
                 normalized,
                 start_date=None,
                 end_date=None,
@@ -1254,59 +1253,15 @@ async def _run_reference_preload_after_history(
     await _preload_reference_caches(symbols=symbols, force_refresh=force_refresh)
 
 
-scheduler = AsyncIOScheduler(timezone="Asia/Ho_Chi_Minh")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Initializing MySQL schema...")
-    init_db()
-
-    intraday_task = asyncio.create_task(fetcher_service.fetch_loop(), name="vn30-intraday-fetch")
-    history_task = asyncio.create_task(
-        fetcher_service.preload_historical_data(VN30_SYMBOLS),
-        name="vn30-history-preload",
-    )
-    reference_preload_task: Optional[asyncio.Task[Any]] = None
-
-    if PRELOAD_REFERENCE_CACHE_ENABLED:
-        preload_symbols = VN30_SYMBOLS[:PRELOAD_REFERENCE_SYMBOL_LIMIT]
-        reference_preload_task = asyncio.create_task(
-            _run_reference_preload_after_history(
-                history_task=history_task,
-                symbols=preload_symbols,
-                force_refresh=PRELOAD_REFERENCE_FORCE_REFRESH,
-            ),
-            name="vn30-reference-preload",
-        )
-
-    if not scheduler.get_job("vn30-eod-job"):
-        scheduler.add_job(
-            aggregate_eod_data,
-            "cron",
-            id="vn30-eod-job",
-            day_of_week="mon-fri",
-            hour=15,
-            minute=15,
-        )
-    if not scheduler.running:
-        scheduler.start()
-
-    try:
-        yield
-    finally:
-        fetcher_service.stop()
-
-        running_tasks: list[asyncio.Task[Any]] = [intraday_task, history_task]
-        if reference_preload_task is not None:
-            running_tasks.append(reference_preload_task)
-
-        for task in running_tasks:
-            task.cancel()
-        await asyncio.gather(*running_tasks, return_exceptions=True)
-
-        aggregate_eod_data()
-        if scheduler.running:
-            scheduler.shutdown(wait=False)
+lifespan = build_lifespan(
+    init_db=init_db,
+    fetcher_service=fetcher_service,
+    fundamental_service=fundamental_service,
+    vn30_symbols=VN30_SYMBOLS,
+    preload_reference_cache_enabled=PRELOAD_REFERENCE_CACHE_ENABLED,
+    preload_reference_force_refresh=PRELOAD_REFERENCE_FORCE_REFRESH,
+    preload_reference_symbol_limit=PRELOAD_REFERENCE_SYMBOL_LIMIT,
+)
 
 
 app = FastAPI(title="VNStock Intraday API V2", lifespan=lifespan, version="2.0.0")
@@ -1345,7 +1300,7 @@ async def _ensure_history_data(
     end_date: Optional[date],
     limit: int,
 ) -> list[dict[str, Any]]:
-    records = fetcher_service.load_history_from_db(symbol, start_date=start_date, end_date=end_date, limit=limit)
+    records = await fetcher_service.load_history_from_db_async(symbol, start_date=start_date, end_date=end_date, limit=limit)
     if records:
         return records
 
@@ -1355,20 +1310,18 @@ async def _ensure_history_data(
         end_date=end_date,
         lookback_days=max(limit, 365),
     )
-    return fetcher_service.load_history_from_db(symbol, start_date=start_date, end_date=end_date, limit=limit)
+    return await fetcher_service.load_history_from_db_async(symbol, start_date=start_date, end_date=end_date, limit=limit)
 
 
 @app.get("/api/health")
-def health_check() -> dict[str, str]:
-    db = SessionLocal()
-    try:
-        db.execute(text("SELECT 1"))
-        return {"status": "ok", "database": "mysql-connected"}
-    except Exception as exc:
-        logger.error("Health check DB error: %s", exc)
-        return {"status": "error", "database": f"mysql-error:{exc.__class__.__name__}"}
-    finally:
-        db.close()
+async def health_check() -> dict[str, str]:
+    async with AsyncSessionLocal() as db:
+        try:
+            await db.execute(text("SELECT 1"))
+            return {"status": "ok", "database": "mysql-connected"}
+        except Exception as exc:
+            logger.error("Health check DB error: %s", exc)
+            return {"status": "error", "database": f"mysql-error:{exc.__class__.__name__}"}
 
 
 @app.get("/api/stocks")
@@ -1421,7 +1374,7 @@ async def get_overview(
     overview_payload: dict[str, Any] = {}
     overview_synced_at: Optional[str] = None
     if not refresh:
-        cached_overview, cached_synced_at = _load_symbol_payload_cache(
+        cached_overview, cached_synced_at = await _load_symbol_payload_cache(
             CompanyOverviewCache,
             normalized,
             max_age_seconds=None,
@@ -1431,7 +1384,7 @@ async def get_overview(
             overview_synced_at = cached_synced_at
 
     if refresh or not overview_payload:
-        refreshed_overview, refreshed_synced_at = await _refresh_company_overview(normalized)
+        refreshed_overview, refreshed_synced_at = await fundamental_service.refresh_company_overview(normalized)
         if refreshed_overview:
             overview_payload = dict(refreshed_overview)
             overview_synced_at = refreshed_synced_at
@@ -1439,7 +1392,7 @@ async def get_overview(
     ratio_records: list[dict[str, Any]] = []
     ratios_synced_at: Optional[str] = None
     if not refresh:
-        cached_ratios, cached_ratio_synced_at = _load_financial_report_cache(
+        cached_ratios, cached_ratio_synced_at = await _load_financial_report_cache(
             normalized,
             "ratios",
             max_age_seconds=None,
@@ -1449,7 +1402,7 @@ async def get_overview(
             ratios_synced_at = cached_ratio_synced_at
 
     if refresh or not ratio_records:
-        refreshed_ratios, refreshed_ratio_synced_at = await _refresh_financial_report(normalized, "ratios")
+        refreshed_ratios, refreshed_ratio_synced_at = await fundamental_service.refresh_financial_report(normalized, "ratios")
         if refreshed_ratios:
             ratio_records = list(refreshed_ratios)
             ratios_synced_at = refreshed_ratio_synced_at
@@ -1628,7 +1581,7 @@ async def get_technical(
     history_last_time = str(records[-1].get("time")) if records else None
 
     if not refresh:
-        cached_row, cached_payload = _load_technical_cache(
+        cached_row, cached_payload = await _load_technical_cache(
             normalized,
             start_date=start_date,
             end_date=end_date,
@@ -1647,7 +1600,7 @@ async def get_technical(
             return payload
 
     payload = _calculate_technical_payload(normalized, records)
-    technical_synced_at = _save_technical_cache(
+    technical_synced_at = await _save_technical_cache(
         normalized,
         start_date=start_date,
         end_date=end_date,
@@ -1672,7 +1625,7 @@ async def get_financials(
     cached_rows: Optional[list[dict[str, Any]]] = None
     cached_synced_at: Optional[str] = None
     if not refresh:
-        cached_rows, cached_synced_at = _load_financial_report_cache(
+        cached_rows, cached_synced_at = await _load_financial_report_cache(
             normalized,
             report_type,
             max_age_seconds=None,
@@ -1688,7 +1641,7 @@ async def get_financials(
             "last_synced_at": cached_synced_at,
         }
 
-    rows, synced_at = await _refresh_financial_report(normalized, report_type)
+    rows, synced_at = await fundamental_service.refresh_financial_report(normalized, report_type)
     if rows:
         return {
             "symbol": normalized,
@@ -1699,7 +1652,7 @@ async def get_financials(
             "last_synced_at": synced_at,
         }
 
-    stale_rows, stale_synced_at = _load_financial_report_cache(
+    stale_rows, stale_synced_at = await _load_financial_report_cache(
         normalized,
         report_type,
         max_age_seconds=None,
@@ -1789,7 +1742,7 @@ async def get_news(
     synced_at_values: list[str] = []
 
     for symbol in target:
-        items, synced_at = await _get_symbol_news(symbol, refresh=refresh)
+        items, synced_at = await fundamental_service.get_symbol_news(symbol, refresh=refresh)
         merged.extend(items)
         if synced_at:
             synced_at_values.append(synced_at)
@@ -1819,7 +1772,7 @@ async def get_events(
     synced_at_values: list[str] = []
 
     for symbol in target:
-        items, synced_at = await _get_symbol_events(symbol, refresh=refresh)
+        items, synced_at = await fundamental_service.get_symbol_events(symbol, refresh=refresh)
         merged.extend(items)
         if synced_at:
             synced_at_values.append(synced_at)

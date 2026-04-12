@@ -7,9 +7,12 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from sqlalchemy import select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from vnstock import Quote, change_api_key
 
-from src.database.db import SessionLocal
+from src.database.db import AsyncSessionLocal, SessionLocal
 from src.database.models import DailyOHLCV
 
 logger = logging.getLogger(__name__)
@@ -29,6 +32,9 @@ MAX_TICKS_PER_SYMBOL = max(int(os.getenv("VNSTOCK_MAX_TICKS_PER_SYMBOL", "1200")
 DEFAULT_HISTORY_LOOKBACK_DAYS = max(int(os.getenv("VNSTOCK_HISTORY_LOOKBACK_DAYS", "365")), 30)
 MIN_REQUEST_INTERVAL_SECONDS = max(float(os.getenv("VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS", "1.05")), 0.6)
 OUT_OF_SESSION_POLL_SECONDS = max(int(os.getenv("VNSTOCK_OUT_OF_SESSION_POLL_SECONDS", "60")), 15)
+INTRADAY_CONCURRENCY = max(int(os.getenv("VNSTOCK_INTRADAY_CONCURRENCY", "4")), 1)
+HISTORY_PRELOAD_CONCURRENCY = max(int(os.getenv("VNSTOCK_HISTORY_PRELOAD_CONCURRENCY", "3")), 1)
+FETCH_RETRY_ATTEMPTS = max(int(os.getenv("VNSTOCK_FETCH_RETRY_ATTEMPTS", "3")), 1)
 
 TRADING_MORNING_START = dt_time(hour=9, minute=0)
 TRADING_MORNING_END = dt_time(hour=11, minute=30)
@@ -154,6 +160,8 @@ class VnstockFetcherService:
         self._cache_lock = asyncio.Lock()
         self._rate_lock = asyncio.Lock()
         self._last_request_at = 0.0
+        self._intraday_semaphore = asyncio.Semaphore(INTRADAY_CONCURRENCY)
+        self._history_semaphore = asyncio.Semaphore(HISTORY_PRELOAD_CONCURRENCY)
 
         self._configure_api_key()
 
@@ -220,10 +228,22 @@ class VnstockFetcherService:
 
         return float(OUT_OF_SESSION_POLL_SECONDS)
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=0.8, min=1, max=5),
+        stop=stop_after_attempt(FETCH_RETRY_ATTEMPTS),
+        reraise=True,
+    )
     def _fetch_intraday_sync(self, symbol: str) -> Optional[pd.DataFrame]:
         quote = Quote(source=self.quote_source, symbol=symbol)
         return quote.intraday(page_size=self.intraday_page_size)
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=0.8, min=1, max=5),
+        stop=stop_after_attempt(FETCH_RETRY_ATTEMPTS),
+        reraise=True,
+    )
     def _fetch_history_sync(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
         quote = Quote(source=self.quote_source, symbol=symbol)
         return quote.history(start=start, end=end, interval="1D")
@@ -345,8 +365,8 @@ class VnstockFetcherService:
         if not ignore_session and not self.is_intraday_fetch_window():
             return False
 
-        await self._respect_rate_limit()
-        for attempt in range(2):
+        async with self._intraday_semaphore:
+            await self._respect_rate_limit()
             try:
                 frame = await asyncio.to_thread(self._fetch_intraday_sync, normalized)
                 ticks = self._normalize_intraday_rows(normalized, frame)
@@ -357,28 +377,26 @@ class VnstockFetcherService:
                 async with self._cache_lock:
                     return self._merge_ticks_no_lock(normalized, ticks) > 0
             except BaseException as exc:
-                if attempt == 0:
-                    logger.warning(
-                        "Transient intraday fetch failure for %s: %s (type=%s), retrying once",
-                        normalized,
-                        exc,
-                        type(exc).__name__,
-                    )
-                    await asyncio.sleep(0.35)
-                    continue
-
                 logger.error("Failed intraday fetch for %s: %s (type=%s)", normalized, exc, type(exc).__name__)
                 return False
 
-        return False
-
     async def refresh_symbols_once(self, symbols: List[str], ignore_session: bool = False) -> int:
+        target_symbols = [normalize_symbol(symbol) for symbol in symbols if is_vn30_symbol(symbol)]
+        if not target_symbols:
+            return 0
+
+        tasks = [
+            asyncio.create_task(self.refresh_symbol_intraday(symbol, ignore_session=ignore_session))
+            for symbol in target_symbols
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
         updated = 0
-        for symbol in symbols:
-            if self._stop_event.is_set():
-                break
-            changed = await self.refresh_symbol_intraday(symbol, ignore_session=ignore_session)
-            if changed:
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.warning("Concurrent refresh task failed: %s", result)
+                continue
+            if result:
                 updated += 1
         return updated
 
@@ -445,33 +463,30 @@ class VnstockFetcherService:
 
         db = SessionLocal()
         try:
-            min_date = rows[0]["date"]
-            max_date = rows[-1]["date"]
-            existing_rows = (
-                db.query(DailyOHLCV)
-                .filter(DailyOHLCV.symbol == symbol)
-                .filter(DailyOHLCV.date >= min_date)
-                .filter(DailyOHLCV.date <= max_date)
-                .all()
+            payload_rows = [
+                {
+                    "symbol": symbol,
+                    "date": row["date"],
+                    "open": row["open"],
+                    "high": row["high"],
+                    "low": row["low"],
+                    "close": row["close"],
+                    "volume": row["volume"],
+                    "created_at": datetime.utcnow(),
+                }
+                for row in rows
+            ]
+            stmt = mysql_insert(DailyOHLCV).values(payload_rows)
+            stmt = stmt.on_duplicate_key_update(
+                open=stmt.inserted.open,
+                high=stmt.inserted.high,
+                low=stmt.inserted.low,
+                close=stmt.inserted.close,
+                volume=stmt.inserted.volume,
             )
-            by_date = {row.date: row for row in existing_rows}
-
-            affected = 0
-            for row in rows:
-                current = by_date.get(row["date"])
-                if current is None:
-                    current = DailyOHLCV(symbol=symbol, date=row["date"])
-                    db.add(current)
-
-                current.open = row["open"]
-                current.high = row["high"]
-                current.low = row["low"]
-                current.close = row["close"]
-                current.volume = row["volume"]
-                affected += 1
-
+            db.execute(stmt)
             db.commit()
-            return affected
+            return len(payload_rows)
         except Exception:
             db.rollback()
             raise
@@ -495,32 +510,52 @@ class VnstockFetcherService:
         if safe_start > safe_end:
             safe_start, safe_end = safe_end, safe_start
 
-        await self._respect_rate_limit()
-        try:
-            frame = await asyncio.to_thread(
-                self._fetch_history_sync,
-                normalized,
-                safe_start.isoformat(),
-                safe_end.isoformat(),
-            )
-            rows = self._normalize_history_rows(frame)
-            if not rows:
-                return 0
+        async with self._history_semaphore:
+            await self._respect_rate_limit()
+            try:
+                frame = await asyncio.to_thread(
+                    self._fetch_history_sync,
+                    normalized,
+                    safe_start.isoformat(),
+                    safe_end.isoformat(),
+                )
+                rows = self._normalize_history_rows(frame)
+                if not rows:
+                    return 0
 
-            affected = await asyncio.to_thread(self._upsert_daily_rows_sync, normalized, rows)
-            self.last_history_sync_at[normalized] = datetime.now(tz=VN_TZ).isoformat()
-            return affected
-        except BaseException as exc:
-            logger.warning("Failed history sync for %s: %s", normalized, exc)
-            return 0
+                affected = await asyncio.to_thread(self._upsert_daily_rows_sync, normalized, rows)
+                self.last_history_sync_at[normalized] = datetime.now(tz=VN_TZ).isoformat()
+                return affected
+            except BaseException as exc:
+                logger.warning("Failed history sync for %s: %s", normalized, exc)
+                return 0
 
     async def preload_historical_data(self, symbols: Optional[List[str]] = None) -> None:
         target_symbols = symbols or VN30_SYMBOLS
         logger.info("Starting historical preload for %s symbols", len(target_symbols))
+
+        queue: asyncio.Queue[str] = asyncio.Queue()
         for symbol in target_symbols:
-            if self._stop_event.is_set():
-                break
-            await self.refresh_history_for_symbol(symbol)
+            if is_vn30_symbol(symbol):
+                queue.put_nowait(normalize_symbol(symbol))
+
+        async def _worker() -> None:
+            while not self._stop_event.is_set():
+                try:
+                    symbol = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    await self.refresh_history_for_symbol(symbol)
+                finally:
+                    queue.task_done()
+
+        workers = [
+            asyncio.create_task(_worker(), name=f"history-preload-worker-{idx}")
+            for idx in range(max(1, HISTORY_PRELOAD_CONCURRENCY))
+        ]
+        await asyncio.gather(*workers, return_exceptions=True)
+
         logger.info("Finished historical preload")
 
     def load_history_from_db(
@@ -558,6 +593,39 @@ class VnstockFetcherService:
             ]
         finally:
             db.close()
+
+    async def load_history_from_db_async(
+        self,
+        symbol: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        limit: int = 365,
+    ) -> List[Dict[str, Any]]:
+        normalized = normalize_symbol(symbol)
+        if not is_vn30_symbol(normalized):
+            return []
+
+        safe_limit = max(limit, 1)
+        async with AsyncSessionLocal() as db:
+            query = select(DailyOHLCV).where(DailyOHLCV.symbol == normalized)
+            if start_date:
+                query = query.where(DailyOHLCV.date >= start_date)
+            if end_date:
+                query = query.where(DailyOHLCV.date <= end_date)
+
+            result = await db.execute(query.order_by(DailyOHLCV.date.desc()).limit(safe_limit))
+            records = list(reversed(result.scalars().all()))
+            return [
+                {
+                    "time": item.date.isoformat(),
+                    "open": float(item.open),
+                    "high": float(item.high),
+                    "low": float(item.low),
+                    "close": float(item.close),
+                    "volume": int(item.volume),
+                }
+                for item in records
+            ]
 
     async def ingest_realtime_quotes(self, quotes: List[Dict[str, Any]]) -> int:
         saved = 0
@@ -663,7 +731,7 @@ class VnstockFetcherService:
     def aggregate_today_intraday_to_daily(self) -> int:
         today = datetime.now(tz=VN_TZ).date()
         db = SessionLocal()
-        affected = 0
+        payload_rows: list[dict[str, Any]] = []
 
         try:
             for symbol in VN30_SYMBOLS:
@@ -685,20 +753,35 @@ class VnstockFetcherService:
                 low_price = min(prices)
                 volume = sum(_to_int(tick.get("volume")) for tick in ticks)
 
-                current = db.query(DailyOHLCV).filter_by(symbol=symbol, date=today).first()
-                if current is None:
-                    current = DailyOHLCV(symbol=symbol, date=today)
-                    db.add(current)
+                payload_rows.append(
+                    {
+                        "symbol": symbol,
+                        "date": today,
+                        "open": open_price,
+                        "high": high_price,
+                        "low": low_price,
+                        "close": close_price,
+                        "volume": volume,
+                        "created_at": datetime.utcnow(),
+                    }
+                )
 
-                current.open = open_price
-                current.high = high_price
-                current.low = low_price
-                current.close = close_price
-                current.volume = volume
-                affected += 1
+            if not payload_rows:
+                db.commit()
+                return 0
+
+            stmt = mysql_insert(DailyOHLCV).values(payload_rows)
+            stmt = stmt.on_duplicate_key_update(
+                open=stmt.inserted.open,
+                high=stmt.inserted.high,
+                low=stmt.inserted.low,
+                close=stmt.inserted.close,
+                volume=stmt.inserted.volume,
+            )
+            db.execute(stmt)
 
             db.commit()
-            return affected
+            return len(payload_rows)
         except Exception:
             db.rollback()
             raise
