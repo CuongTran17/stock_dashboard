@@ -5,7 +5,7 @@
       @click.prevent="toggleDropdown"
     >
       <span class="mr-3 overflow-hidden rounded-full h-11 w-11">
-        <img src="/images/user/owner.jpg" alt="User" />
+        <img :src="avatarSrc" alt="User" class="h-full w-full object-cover" />
       </span>
 
       <span class="block mr-1 font-medium text-theme-sm">{{ displayName }}</span>
@@ -43,7 +43,7 @@
         </li>
       </ul>
       <router-link
-        to="/signin"
+        to="/welcome"
         @click="signOut"
         class="flex items-center gap-3 px-3 py-2 mt-3 font-medium text-gray-700 rounded-lg group text-theme-sm hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-300"
       >
@@ -70,15 +70,20 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const currentUser = computed(() => getSavedUser())
 const displayName = computed(() => currentUser.value?.fullname || 'Khách')
 const displayEmail = computed(() => currentUser.value?.email || '')
-const loggedIn = computed(() => isLoggedIn())
+const avatarSrc = computed(() => currentUser.value?.avatar_data || '/images/user/owner.jpg')
 
 const menuItems = [
+  { href: '/profile', icon: UserCircleIcon, text: 'Tài khoản của tôi' },
   { href: '/my-portfolio', icon: UserCircleIcon, text: 'Danh mục của tôi' },
   { href: '/screener', icon: SettingsIcon, text: 'Lọc cổ phiếu' },
   { href: '/news-events', icon: InfoCircleIcon, text: 'Tin tức thị trường' },
 ]
 
 const toggleDropdown = () => {
+  if (!isLoggedIn()) {
+    router.push('/signin')
+    return
+  }
   dropdownOpen.value = !dropdownOpen.value
 }
 
@@ -89,7 +94,7 @@ const closeDropdown = () => {
 const signOut = () => {
   authLogout()
   closeDropdown()
-  router.push('/signin')
+  router.push('/welcome')
 }
 
 const handleClickOutside = (event: Event) => {

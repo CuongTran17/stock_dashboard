@@ -69,6 +69,7 @@
                 <router-link
                   v-if="item.path"
                   :to="item.path"
+                  @click="handleMenuClick($event, item.path)"
                   :class="[
                     'menu-item group',
                     {
@@ -103,7 +104,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   HorizontalDots,
@@ -114,15 +115,17 @@ import {
   MailIcon,
   ChatIcon,
   UserCircleIcon,
+  LogoutIcon,
   PieChartIcon,
   BoxCubeIcon,
   UserGroupIcon,
 } from '../../icons'
 import StockChartIcon from '@/icons/StockChartIcon.vue'
 import { useSidebar } from '@/composables/useSidebar'
-import { isLoggedIn, isAdmin, isPremium, getSavedUser } from '@/services/authApi'
+import { isLoggedIn, isAdmin, isPremium, getSavedUser, logout as authLogout } from '@/services/authApi'
 
 const route = useRoute()
+const router = useRouter()
 
 const { isExpanded, isMobileOpen, isHovered } = useSidebar()
 
@@ -146,12 +149,15 @@ const menuGroups = computed(() => {
   if (isLoggedIn()) {
     const user = getSavedUser()
     const userItems: { icon: any; name: string; path: string }[] = [
+      { icon: UserCircleIcon, name: 'Tài khoản của tôi', path: '/profile' },
       { icon: BoxCubeIcon, name: 'Danh mục của tôi', path: '/my-portfolio' },
     ]
 
     if (!isPremium()) {
       userItems.push({ icon: PieChartIcon, name: '⭐ Nâng cấp Premium', path: '/premium' })
     }
+
+    userItems.push({ icon: LogoutIcon, name: 'Đăng xuất', path: '/logout' })
 
     groups.push({ title: user?.fullname || 'Tài khoản', items: userItems })
   } else {
@@ -179,10 +185,29 @@ const menuGroups = computed(() => {
 })
 
 function isActive(path: string): boolean {
+  if (path === '/logout') {
+    return false
+  }
   if (path.startsWith('/stocks/')) {
     return route.path.startsWith('/stocks/')
   }
   return route.path === path
+}
+
+const handleMenuClick = (event: Event, path: string): void => {
+  if (path === '/ai-analysis' && !isPremium()) {
+    event.preventDefault()
+    router.push('/premium')
+    return
+  }
+
+  if (path !== '/logout') {
+    return
+  }
+
+  event.preventDefault()
+  authLogout()
+  router.push('/welcome')
 }
 </script>
 

@@ -14,6 +14,7 @@ export interface UserInfo {
   email: string
   phone: string | null
   fullname: string
+  avatar_data: string | null
   role: 'user' | 'premium' | 'admin'
   created_at?: string
 }
@@ -169,10 +170,14 @@ export async function getMe(): Promise<UserInfo> {
   return user
 }
 
-export async function updateProfile(fullname?: string, phone?: string): Promise<AuthResponse> {
+export async function updateProfile(
+  fullname?: string,
+  phone?: string,
+  avatarData?: string | null,
+): Promise<AuthResponse> {
   const data = await authFetch<AuthResponse>('/api/auth/profile', {
     method: 'PUT',
-    body: JSON.stringify({ fullname, phone }),
+    body: JSON.stringify({ fullname, phone, avatar_data: avatarData }),
   })
   setToken(data.token)
   saveUser(data.user)

@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { isLoggedIn, isAdmin, getSavedUser } from '@/services/authApi'
+import { isLoggedIn, isAdmin, isPremium } from '@/services/authApi'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -50,7 +50,7 @@ const router = createRouter({
       path: '/ai-analysis',
       name: 'StockAIAnalysis',
       component: () => import('../views/StockAIAnalysis.vue'),
-      meta: { title: 'Phân tích cổ phiếu bằng AI' },
+      meta: { title: 'Phân tích cổ phiếu bằng AI', requiresAuth: true, requiresPremium: true },
     },
 
     // ── Premium Upgrade ─────────────────────────────────────────
@@ -96,11 +96,23 @@ const router = createRouter({
       component: () => import('../views/Auth/Signup.vue'),
       meta: { title: 'Đăng ký' },
     },
+    {
+      path: '/welcome',
+      name: 'GuestGate',
+      component: () => import('../views/Auth/GuestGate.vue'),
+      meta: { title: 'Join With Us' },
+    },
+    {
+      path: '/profile',
+      name: 'Profile',
+      component: () => import('../views/Profile.vue'),
+      meta: { title: 'Tài khoản của tôi', requiresAuth: true },
+    },
 
     // ── Catch-all ───────────────────────────────────────────────
     {
       path: '/:pathMatch(.*)*',
-      redirect: '/',
+      redirect: '/welcome',
       meta: { title: 'Bảng điều khiển cổ phiếu' },
     },
   ],
@@ -110,6 +122,17 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   document.title = `${to.meta.title} | The Fin1`
 
+  const publicPaths = ['/welcome', '/signin', '/signup']
+  const isPublicRoute = publicPaths.includes(to.path)
+
+  if (!isLoggedIn() && !isPublicRoute) {
+    return next({ name: 'GuestGate' })
+  }
+
+  if (isLoggedIn() && isPublicRoute) {
+    return next({ name: 'StockDashboard' })
+  }
+
   // Auth check
   if (to.meta.requiresAuth && !isLoggedIn()) {
     return next({ name: 'Signin', query: { redirect: to.fullPath } })
@@ -118,6 +141,11 @@ router.beforeEach((to, from, next) => {
   // Admin check
   if (to.meta.requiresAdmin && !isAdmin()) {
     return next({ name: 'StockDashboard' })
+  }
+
+  // Premium check
+  if (to.meta.requiresPremium && !isPremium()) {
+    return next({ name: 'PremiumUpgrade' })
   }
 
   next()

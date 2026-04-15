@@ -71,7 +71,14 @@ def _ensure_payload_columns_longtext() -> None:
 
 def _ensure_user_profile_columns() -> None:
     statements = [
+        "ALTER TABLE users MODIFY COLUMN first_name VARCHAR(120) NULL",
+        "ALTER TABLE users MODIFY COLUMN last_name VARCHAR(120) NULL",
+        "ALTER TABLE users ADD COLUMN fullname VARCHAR(255) NULL",
+        "ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL",
         "ALTER TABLE users ADD COLUMN avatar_data LONGTEXT NULL",
+        "ALTER TABLE users ADD COLUMN role ENUM('user','premium','admin') NOT NULL DEFAULT 'user'",
+        "ALTER TABLE users ADD COLUMN is_locked TINYINT(1) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN locked_reason VARCHAR(500) NULL",
     ]
 
     with engine.begin() as connection:

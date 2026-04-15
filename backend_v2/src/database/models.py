@@ -20,22 +20,6 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
-class UserAccount(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    first_name = Column(String(120), nullable=False)
-    last_name = Column(String(120), nullable=False)
-    email = Column(String(255), nullable=False, unique=True, index=True)
-    avatar_data = Column(LONGTEXT, nullable=True)
-    password_hash = Column(String(255), nullable=False)
-    password_salt = Column(String(255), nullable=False)
-    is_active = Column(Integer, nullable=False, default=1)
-    last_login_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
 class DailyOHLCV(Base):
     __tablename__ = "daily_ohlcv"
     __table_args__ = (
@@ -125,17 +109,23 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    first_name = Column(String(120), nullable=True)
+    last_name = Column(String(120), nullable=True)
     phone = Column(String(20), unique=True, nullable=True)
     password_hash = Column(String(255), nullable=False)
+    password_salt = Column(String(255), nullable=False, default="")
     fullname = Column(String(255), nullable=False)
+    avatar_data = Column(LONGTEXT, nullable=True)
     role = Column(
         Enum("user", "premium", "admin", name="user_role_enum"),
         nullable=False,
         default="user",
         server_default="user",
     )
+    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     is_locked = Column(Boolean, nullable=False, default=False, server_default="0")
     locked_reason = Column(String(500), nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

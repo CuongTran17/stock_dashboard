@@ -7,7 +7,7 @@
         <div class="flex flex-col flex-1 w-full lg:w-1/2">
           <div class="w-full max-w-md pt-10 mx-auto">
             <router-link
-              to="/"
+              to="/welcome"
               class="inline-flex items-center text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
             >
               <svg
@@ -26,7 +26,7 @@
                   stroke-linejoin="round"
                 />
               </svg>
-              Quay lại bảng điều khiển
+              Quay lại màn hình giới thiệu
             </router-link>
           </div>
           <div class="flex flex-col justify-center flex-1 w-full max-w-md mx-auto">
@@ -263,7 +263,7 @@
           <div class="flex items-center justify-center z-1">
             <common-grid-shape />
             <div class="flex flex-col items-center max-w-xs">
-              <router-link to="/" class="block mb-4">
+              <router-link to="/welcome" class="block mb-4">
                 <img width="{231}" height="{48}" src="/images/logo/auth-logo.svg" alt="Logo" />
               </router-link>
               <p class="text-center text-gray-400 dark:text-white/60">

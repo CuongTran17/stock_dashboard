@@ -1,11 +1,13 @@
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
-    <div class="max-w-4xl mx-auto">
+  <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <PageHeader title="📊 Danh mục của tôi" />
+
+    <div class="p-6">
       <div class="flex items-center justify-between mb-8">
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">📊 Danh mục của tôi</h1>
         <button
           @click="showAddModal = true"
-          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+          class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -23,7 +25,7 @@
       <div v-else-if="items.length === 0" class="text-center py-16">
         <div class="text-6xl mb-4">📭</div>
         <p class="text-gray-500 dark:text-gray-400 mb-4">Chưa có mã cổ phiếu nào trong danh mục</p>
-        <button @click="showAddModal = true" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+        <button @click="showAddModal = true" class="px-6 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors">
           Thêm mã đầu tiên
         </button>
       </div>
@@ -43,7 +45,7 @@
           <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
             <tr v-for="item in items" :key="item.id" class="hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors">
               <td class="px-6 py-4">
-                <router-link :to="`/stocks/${item.symbol}`" class="font-semibold text-blue-600 hover:underline">
+                <router-link :to="`/stocks/${item.symbol}`" class="font-semibold text-brand-600 hover:underline">
                   {{ item.symbol }}
                 </router-link>
               </td>
@@ -68,33 +70,60 @@
         <form @submit.prevent="handleAdd" class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mã cổ phiếu</label>
-            <input v-model="newSymbol" type="text" maxlength="10" placeholder="VD: FPT" required
-              class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none uppercase" />
+            <input
+              v-model="newSymbol"
+              type="text"
+              maxlength="10"
+              placeholder="VD: FPT"
+              required
+              class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none uppercase"
+            />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Số lượng</label>
-              <input v-model.number="newQuantity" type="number" min="0" placeholder="0"
-                class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+              <input
+                v-model.number="newQuantity"
+                type="number"
+                min="0"
+                placeholder="0"
+                class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Giá TB</label>
-              <input v-model.number="newAvgPrice" type="number" min="0" step="100" placeholder="0"
-                class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+              <input
+                v-model.number="newAvgPrice"
+                type="number"
+                min="0"
+                step="100"
+                placeholder="0"
+                class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
             </div>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ghi chú</label>
-            <input v-model="newNote" type="text" placeholder="Tùy chọn..."
-              class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+            <input
+              v-model="newNote"
+              type="text"
+              placeholder="Tùy chọn..."
+              class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            />
           </div>
           <div class="flex gap-3 pt-2">
-            <button type="button" @click="showAddModal = false"
-              class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+            <button
+              type="button"
+              @click="showAddModal = false"
+              class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
               Hủy
             </button>
-            <button type="submit" :disabled="addLoading"
-              class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+            <button
+              type="submit"
+              :disabled="addLoading"
+              class="flex-1 px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors disabled:opacity-50"
+            >
               {{ addLoading ? 'Đang thêm...' : 'Thêm' }}
             </button>
           </div>
@@ -105,8 +134,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { getMyPortfolio, addToPortfolio, removeFromPortfolio, type PortfolioItem } from '@/services/authApi'
+import { onMounted, ref } from 'vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import { addToPortfolio, getMyPortfolio, removeFromPortfolio, type PortfolioItem } from '@/services/authApi'
 
 const items = ref<PortfolioItem[]>([])
 const loading = ref(true)

@@ -26,7 +26,7 @@ JWT_SECRET = os.getenv("JWT_SECRET", "stockai_jwt_secret_change_me_in_production
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
 
 # ── Pydantic Schemas ─────────────────────────────────────────────────
@@ -47,6 +47,7 @@ class UserResponse(BaseModel):
     email: str
     phone: Optional[str]
     fullname: str
+    avatar_data: Optional[str] = None
     role: str
     created_at: Optional[str] = None
 
@@ -60,6 +61,7 @@ class AuthResponse(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     fullname: Optional[str] = None
     phone: Optional[str] = None
+    avatar_data: Optional[str] = Field(default=None, max_length=12_000_000)
 
 
 class PasswordUpdateRequest(BaseModel):
@@ -136,11 +138,13 @@ def require_role(*roles: str):
 
 
 def _user_to_response(user: User) -> UserResponse:
+    fallback_name = (user.email.split("@")[0] if user.email else "Người dùng")
     return UserResponse(
         id=user.id,
         email=user.email,
         phone=user.phone,
-        fullname=user.fullname,
+        fullname=user.fullname or fallback_name,
+        avatar_data=user.avatar_data,
         role=user.role,
         created_at=user.created_at.isoformat() if user.created_at else None,
     )
@@ -159,12 +163,20 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)):
         if db.query(User).filter(User.phone == body.phone).first():
             raise HTTPException(status_code=400, detail="Số điện thoại đã được sử dụng")
 
+    name_parts = body.fullname.strip().split()
+    first_name = name_parts[-1] if name_parts else body.fullname.strip()
+    last_name = " ".join(name_parts[:-1]) if len(name_parts) > 1 else ""
+
     user = User(
         email=email_lower,
         phone=body.phone,
+        first_name=first_name,
+        last_name=last_name,
         password_hash=pwd_context.hash(body.password),
+        password_salt="",
         fullname=body.fullname.strip(),
         role="user",
+        is_active=True,
     )
     db.add(user)
     db.commit()
@@ -197,6 +209,13 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     if user.is_locked:
         raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa")
 
+    if hasattr(user, "is_active") and user.is_active is False:
+        raise HTTPException(status_code=403, detail="Tài khoản đã bị vô hiệu hóa")
+
+    user.last_login_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+
     token = _create_access_token(user)
     return AuthResponse(
         message="Đăng nhập thành công",
@@ -226,6 +245,12 @@ def update_profile(
         if existing:
             raise HTTPException(status_code=400, detail="Số điện thoại đã được sử dụng")
         current_user.phone = body.phone
+
+    if body.avatar_data is not None:
+        avatar_data = body.avatar_data.strip()
+        if avatar_data and not avatar_data.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="Ảnh đại diện không hợp lệ")
+        current_user.avatar_data = avatar_data or None
 
     db.commit()
     db.refresh(current_user)

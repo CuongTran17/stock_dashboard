@@ -8,4 +8,7 @@ mysql-connector-python>=8.0.0
 aiomysql>=0.2.0
 python-dotenv>=1.0.0
 apscheduler>=3.10.0
+PyJWT>=2.8.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.2.0
 tenacity>=9.0.0
