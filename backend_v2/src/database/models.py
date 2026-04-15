@@ -7,6 +7,22 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
+class UserAccount(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    first_name = Column(String(120), nullable=False)
+    last_name = Column(String(120), nullable=False)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    avatar_data = Column(LONGTEXT, nullable=True)
+    password_hash = Column(String(255), nullable=False)
+    password_salt = Column(String(255), nullable=False)
+    is_active = Column(Integer, nullable=False, default=1)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class DailyOHLCV(Base):
     __tablename__ = "daily_ohlcv"
     __table_args__ = (

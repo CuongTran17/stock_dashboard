@@ -69,9 +69,23 @@ def _ensure_payload_columns_longtext() -> None:
                 logger.warning("Schema update skipped for statement '%s': %s", statement, exc)
 
 
+def _ensure_user_profile_columns() -> None:
+    statements = [
+        "ALTER TABLE users ADD COLUMN avatar_data LONGTEXT NULL",
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            try:
+                connection.execute(text(statement))
+            except Exception as exc:
+                logger.warning("Schema update skipped for statement '%s': %s", statement, exc)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_payload_columns_longtext()
+    _ensure_user_profile_columns()
 
 
 def get_db():
