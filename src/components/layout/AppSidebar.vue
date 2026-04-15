@@ -111,6 +111,7 @@ import {
   ListIcon,
   BellIcon,
   MailIcon,
+  ChatIcon,
   UserCircleIcon,
 } from '../../icons'
 import StockChartIcon from '@/icons/StockChartIcon.vue'
@@ -153,6 +154,11 @@ const menuGroups = [
         icon: MailIcon,
         name: 'Tin tức và sự kiện',
         path: '/news-events',
+      },
+      {
+        icon: ChatIcon,
+        name: 'Phân tích cổ phiếu bằng AI',
+        path: '/ai-analysis',
       },
     ],
   },

@@ -55,6 +55,14 @@ const router = createRouter({
       },
     },
     {
+      path: '/ai-analysis',
+      name: 'StockAIAnalysis',
+      component: () => import('../views/StockAIAnalysis.vue'),
+      meta: {
+        title: 'Phân tích cổ phiếu bằng AI',
+      },
+    },
+    {
       path: '/signin',
       name: 'Signin',
       component: () => import('../views/Auth/Signin.vue'),
