@@ -13,6 +13,8 @@ export interface UserInfo {
   id: number
   email: string
   phone: string | null
+  first_name?: string | null
+  last_name?: string | null
   fullname: string
   avatar_data: string | null
   role: 'user' | 'premium' | 'admin'
@@ -171,13 +173,23 @@ export async function getMe(): Promise<UserInfo> {
 }
 
 export async function updateProfile(
-  fullname?: string,
-  phone?: string,
-  avatarData?: string | null,
+  payload: {
+    firstName?: string
+    lastName?: string
+    fullname?: string
+    phone?: string
+    avatarData?: string | null
+  },
 ): Promise<AuthResponse> {
   const data = await authFetch<AuthResponse>('/api/auth/profile', {
     method: 'PUT',
-    body: JSON.stringify({ fullname, phone, avatar_data: avatarData }),
+    body: JSON.stringify({
+      first_name: payload.firstName,
+      last_name: payload.lastName,
+      fullname: payload.fullname,
+      phone: payload.phone,
+      avatar_data: payload.avatarData,
+    }),
   })
   setToken(data.token)
   saveUser(data.user)

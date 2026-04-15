@@ -46,6 +46,8 @@ class UserResponse(BaseModel):
     id: int
     email: str
     phone: Optional[str]
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     fullname: str
     avatar_data: Optional[str] = None
     role: str
@@ -59,6 +61,8 @@ class AuthResponse(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
     fullname: Optional[str] = None
     phone: Optional[str] = None
     avatar_data: Optional[str] = Field(default=None, max_length=12_000_000)
@@ -139,10 +143,21 @@ def require_role(*roles: str):
 
 def _user_to_response(user: User) -> UserResponse:
     fallback_name = (user.email.split("@")[0] if user.email else "Người dùng")
+    first_name = user.first_name or None
+    last_name = user.last_name or None
+
+    if not first_name and not last_name and user.fullname:
+        name_parts = user.fullname.strip().split()
+        if name_parts:
+            first_name = name_parts[-1]
+            last_name = " ".join(name_parts[:-1]) if len(name_parts) > 1 else None
+
     return UserResponse(
         id=user.id,
         email=user.email,
         phone=user.phone,
+        first_name=first_name,
+        last_name=last_name,
         fullname=user.fullname or fallback_name,
         avatar_data=user.avatar_data,
         role=user.role,
@@ -237,8 +252,22 @@ def update_profile(
     db: Session = Depends(get_db),
 ):
     """Update user profile (fullname, phone)."""
+    if body.first_name is not None:
+        current_user.first_name = body.first_name.strip()
+
+    if body.last_name is not None:
+        current_user.last_name = body.last_name.strip()
+
     if body.fullname:
         current_user.fullname = body.fullname.strip()
+
+    if body.first_name is not None or body.last_name is not None:
+        first = (current_user.first_name or "").strip()
+        last = (current_user.last_name or "").strip()
+        composed = " ".join(part for part in [last, first] if part)
+        if composed:
+            current_user.fullname = composed
+
     if body.phone is not None:
         # Check phone uniqueness
         existing = db.query(User).filter(User.phone == body.phone, User.id != current_user.id).first()

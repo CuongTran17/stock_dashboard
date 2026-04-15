@@ -24,18 +24,18 @@
           </div>
 
           <div>
-            <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Họ và tên</label>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Tên</label>
             <input
-              v-model="fullName"
+              v-model="firstName"
               type="text"
               class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
           </div>
 
           <div>
-            <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Số điện thoại</label>
+            <label class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Họ</label>
             <input
-              v-model="phone"
+              v-model="lastName"
               type="text"
               class="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
             />
@@ -78,8 +78,8 @@ const MAX_AVATAR_SIZE_MB = 8
 const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024
 
 const currentUser = ref<UserInfo | null>(getSavedUser())
-const fullName = ref(currentUser.value?.fullname || '')
-const phone = ref(currentUser.value?.phone || '')
+const firstName = ref(currentUser.value?.first_name || '')
+const lastName = ref(currentUser.value?.last_name || '')
 const avatarData = ref<string | null>(currentUser.value?.avatar_data || null)
 const loading = ref(false)
 const errorMessage = ref('')
@@ -90,8 +90,8 @@ const avatarPreview = computed(() => avatarData.value || '/images/user/owner.jpg
 
 const hydrateProfileForm = (user: UserInfo) => {
   currentUser.value = user
-  fullName.value = user.fullname || ''
-  phone.value = user.phone || ''
+  firstName.value = user.first_name || ''
+  lastName.value = user.last_name || ''
   avatarData.value = user.avatar_data || null
 }
 
@@ -140,18 +140,18 @@ const saveProfile = async () => {
   errorMessage.value = ''
   successMessage.value = ''
 
-  if (!fullName.value.trim()) {
-    errorMessage.value = 'Họ và tên không được để trống.'
+  if (!firstName.value.trim() || !lastName.value.trim()) {
+    errorMessage.value = 'Vui lòng nhập đầy đủ Tên và Họ.'
     return
   }
 
   loading.value = true
   try {
-    const response = await updateProfile(
-      fullName.value.trim(),
-      phone.value.trim() || undefined,
-      avatarData.value,
-    )
+    const response = await updateProfile({
+      firstName: firstName.value.trim(),
+      lastName: lastName.value.trim(),
+      avatarData: avatarData.value,
+    })
 
     currentUser.value = response.user
     saveUser(response.user)
