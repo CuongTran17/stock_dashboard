@@ -1274,6 +1274,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Register API Routers ─────────────────────────────────────────────
+from src.api.auth import router as auth_router
+from src.api.payment import router as payment_router
+from src.api.admin import router as admin_router
+from src.api.portfolio import router as portfolio_router
+
+app.include_router(auth_router)
+app.include_router(payment_router)
+app.include_router(admin_router)
+app.include_router(portfolio_router)
+
 
 class SaveQuotePayload(BaseModel):
     symbol: str = Field(min_length=1, max_length=10)

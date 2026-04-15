@@ -263,13 +263,18 @@
                       </label>
                     </div>
                   </div>
+                  <!-- Error Message -->
+                  <div v-if="errorMsg" class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                    <p class="text-sm text-red-600 dark:text-red-400">{{ errorMsg }}</p>
+                  </div>
                   <!-- Button -->
                   <div>
                     <button
                       type="submit"
-                      class="flex items-center justify-center w-full px-4 py-3 text-sm font-medium text-white transition rounded-lg bg-brand-500 shadow-theme-xs hover:bg-brand-600"
+                      :disabled="isSubmitting"
+                      class="flex items-center justify-center w-full px-4 py-3 text-sm font-medium text-white transition rounded-lg bg-brand-500 shadow-theme-xs hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Đăng ký
+                      {{ isSubmitting ? 'Đang đăng ký...' : 'Đăng ký' }}
                     </button>
                   </div>
                 </div>
@@ -313,27 +318,51 @@
 import FullScreenLayout from '@/components/layout/FullScreenLayout.vue'
 import CommonGridShape from '@/components/common/CommonGridShape.vue'
 import { ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { useRouter } from 'vue-router'
+import { register } from '@/services/authApi'
 
+const router = useRouter()
 const firstName = ref('')
 const lastName = ref('')
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const agreeToTerms = ref(false)
+const isSubmitting = ref(false)
+const errorMsg = ref('')
 
 const togglePasswordVisibility = () => {
   showPassword.value = !showPassword.value
 }
 
-const handleSubmit = () => {
-  // Implement form submission logic here
-  console.log('Form submitted', {
-    firstName: firstName.value,
-    lastName: lastName.value,
-    email: email.value,
-    password: password.value,
-    agreeToTerms: agreeToTerms.value,
-  })
+const handleSubmit = async () => {
+  if (!firstName.value || !lastName.value) {
+    errorMsg.value = 'Vui lòng nhập họ tên'
+    return
+  }
+  if (!email.value || !password.value) {
+    errorMsg.value = 'Vui lòng nhập email và mật khẩu'
+    return
+  }
+  if (password.value.length < 6) {
+    errorMsg.value = 'Mật khẩu phải có ít nhất 6 ký tự'
+    return
+  }
+  if (!agreeToTerms.value) {
+    errorMsg.value = 'Vui lòng đồng ý với điều khoản'
+    return
+  }
+
+  isSubmitting.value = true
+  errorMsg.value = ''
+  try {
+    const fullname = `${lastName.value} ${firstName.value}`.trim()
+    await register(email.value, password.value, fullname)
+    router.push('/')
+  } catch (e: any) {
+    errorMsg.value = e.message || 'Đăng ký thất bại'
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>

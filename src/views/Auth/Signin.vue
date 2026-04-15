@@ -225,13 +225,18 @@
                         >Quên mật khẩu?</router-link
                       >
                     </div>
+                    <!-- Error Message -->
+                    <div v-if="errorMsg" class="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                      <p class="text-sm text-red-600 dark:text-red-400">{{ errorMsg }}</p>
+                    </div>
                     <!-- Button -->
                     <div>
                       <button
                         type="submit"
-                        class="flex items-center justify-center w-full px-4 py-3 text-sm font-medium text-white transition rounded-lg bg-brand-500 shadow-theme-xs hover:bg-brand-600"
+                        :disabled="isSubmitting"
+                        class="flex items-center justify-center w-full px-4 py-3 text-sm font-medium text-white transition rounded-lg bg-brand-500 shadow-theme-xs hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Đăng nhập
+                        {{ isSubmitting ? 'Đang đăng nhập...' : 'Đăng nhập' }}
                       </button>
                     </div>
                   </div>
@@ -274,23 +279,39 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import CommonGridShape from '@/components/common/CommonGridShape.vue'
 import FullScreenLayout from '@/components/layout/FullScreenLayout.vue'
+import { login } from '@/services/authApi'
+
+const router = useRouter()
+const route = useRoute()
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const keepLoggedIn = ref(false)
+const isSubmitting = ref(false)
+const errorMsg = ref('')
 
 const togglePasswordVisibility = () => {
   showPassword.value = !showPassword.value
 }
 
-const handleSubmit = () => {
-  // Handle form submission
-  console.log('Form submitted', {
-    email: email.value,
-    password: password.value,
-    keepLoggedIn: keepLoggedIn.value,
-  })
+const handleSubmit = async () => {
+  if (!email.value || !password.value) {
+    errorMsg.value = 'Vui lòng nhập email và mật khẩu'
+    return
+  }
+  isSubmitting.value = true
+  errorMsg.value = ''
+  try {
+    await login(email.value, password.value)
+    const redirect = (route.query.redirect as string) || '/'
+    router.push(redirect)
+  } catch (e: any) {
+    errorMsg.value = e.message || 'Đăng nhập thất bại'
+  } finally {
+    isSubmitting.value = false
+  }
 }
 </script>

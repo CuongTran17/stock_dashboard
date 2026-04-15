@@ -109,7 +109,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import VueApexCharts from 'vue3-apexcharts'
-import type { TechnicalResponse, TradingSignals } from '@/services/stockBackendApi'
+import type { TechnicalResponse } from '@/services/stockBackendApi'
 
 const props = defineProps<{
   symbol: string

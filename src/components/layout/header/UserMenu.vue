@@ -8,7 +8,7 @@
         <img src="/images/user/owner.jpg" alt="User" />
       </span>
 
-      <span class="block mr-1 font-medium text-theme-sm">Musharof </span>
+      <span class="block mr-1 font-medium text-theme-sm">{{ displayName }}</span>
 
       <ChevronDownIcon :class="{ 'rotate-180': dropdownOpen }" />
     </button>
@@ -20,10 +20,10 @@
     >
       <div>
         <span class="block font-medium text-gray-700 text-theme-sm dark:text-gray-400">
-          Musharof Chowdhury
+          {{ displayName }}
         </span>
         <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
-          randomuser@pimjo.com
+          {{ displayEmail }}
         </span>
       </div>
 
@@ -59,14 +59,21 @@
 
 <script setup lang="ts">
 import { ChevronDownIcon, InfoCircleIcon, LogoutIcon, SettingsIcon, UserCircleIcon } from '@/icons'
-import { onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { getSavedUser, isLoggedIn, logout as authLogout } from '@/services/authApi'
 
+const router = useRouter()
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 
+const currentUser = computed(() => getSavedUser())
+const displayName = computed(() => currentUser.value?.fullname || 'Khách')
+const displayEmail = computed(() => currentUser.value?.email || '')
+const loggedIn = computed(() => isLoggedIn())
+
 const menuItems = [
-  { href: '/portfolio-alerts', icon: UserCircleIcon, text: 'Danh mục của tôi' },
+  { href: '/my-portfolio', icon: UserCircleIcon, text: 'Danh mục của tôi' },
   { href: '/screener', icon: SettingsIcon, text: 'Lọc cổ phiếu' },
   { href: '/news-events', icon: InfoCircleIcon, text: 'Tin tức thị trường' },
 ]
@@ -80,9 +87,9 @@ const closeDropdown = () => {
 }
 
 const signOut = () => {
-  localStorage.removeItem('stock_auth_token')
-  localStorage.removeItem('stock_auth_user')
+  authLogout()
   closeDropdown()
+  router.push('/signin')
 }
 
 const handleClickOutside = (event: Event) => {

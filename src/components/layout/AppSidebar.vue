@@ -102,6 +102,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 import {
@@ -113,71 +114,69 @@ import {
   MailIcon,
   ChatIcon,
   UserCircleIcon,
+  PieChartIcon,
+  BoxCubeIcon,
+  UserGroupIcon,
 } from '../../icons'
 import StockChartIcon from '@/icons/StockChartIcon.vue'
 import { useSidebar } from '@/composables/useSidebar'
+import { isLoggedIn, isAdmin, isPremium, getSavedUser } from '@/services/authApi'
 
 const route = useRoute()
 
 const { isExpanded, isMobileOpen, isHovered } = useSidebar()
 
-const menuGroups = [
-  {
-    title: 'Thị trường',
-    items: [
-      {
-        icon: StockChartIcon,
-        name: 'Bảng điều khiển',
-        path: '/',
-      },
-      {
-        icon: LayoutDashboardIcon,
-        name: 'Tổng quan thị trường',
-        path: '/market-overview',
-      },
-      {
-        icon: BarChartIcon,
-        name: 'Chi tiết cổ phiếu',
-        path: '/stocks/FPT',
-      },
-      {
-        icon: ListIcon,
-        name: 'Lọc cổ phiếu',
-        path: '/screener',
-      },
-      {
-        icon: BellIcon,
-        name: 'Cảnh báo danh mục',
-        path: '/portfolio-alerts',
-      },
-      {
-        icon: MailIcon,
-        name: 'Tin tức và sự kiện',
-        path: '/news-events',
-      },
-      {
-        icon: ChatIcon,
-        name: 'Phân tích cổ phiếu bằng AI',
-        path: '/ai-analysis',
-      },
-    ],
-  },
-  {
-    title: 'Tài khoản',
-    items: [
-      {
-        icon: UserCircleIcon,
-        name: 'Đăng nhập',
-        path: '/signin',
-      },
-      {
-        icon: UserCircleIcon,
-        name: 'Đăng ký',
-        path: '/signup',
-      },
-    ],
-  },
-]
+const menuGroups = computed(() => {
+  const groups = [
+    {
+      title: 'Thị trường',
+      items: [
+        { icon: StockChartIcon, name: 'Bảng điều khiển', path: '/' },
+        { icon: LayoutDashboardIcon, name: 'Tổng quan thị trường', path: '/market-overview' },
+        { icon: BarChartIcon, name: 'Chi tiết cổ phiếu', path: '/stocks/FPT' },
+        { icon: ListIcon, name: 'Lọc cổ phiếu', path: '/screener' },
+        { icon: BellIcon, name: 'Cảnh báo danh mục', path: '/portfolio-alerts' },
+        { icon: MailIcon, name: 'Tin tức và sự kiện', path: '/news-events' },
+        { icon: ChatIcon, name: 'Phân tích AI', path: '/ai-analysis' },
+      ],
+    },
+  ]
+
+  // Logged-in user menu
+  if (isLoggedIn()) {
+    const user = getSavedUser()
+    const userItems: { icon: any; name: string; path: string }[] = [
+      { icon: BoxCubeIcon, name: 'Danh mục của tôi', path: '/my-portfolio' },
+    ]
+
+    if (!isPremium()) {
+      userItems.push({ icon: PieChartIcon, name: '⭐ Nâng cấp Premium', path: '/premium' })
+    }
+
+    groups.push({ title: user?.fullname || 'Tài khoản', items: userItems })
+  } else {
+    groups.push({
+      title: 'Tài khoản',
+      items: [
+        { icon: UserCircleIcon, name: 'Đăng nhập', path: '/signin' },
+        { icon: UserCircleIcon, name: 'Đăng ký', path: '/signup' },
+      ],
+    })
+  }
+
+  // Admin menu
+  if (isAdmin()) {
+    groups.push({
+      title: 'Quản trị',
+      items: [
+        { icon: PieChartIcon, name: 'Doanh thu Premium', path: '/admin/sales' },
+        { icon: UserGroupIcon, name: 'Danh mục khách hàng', path: '/admin/portfolios' },
+      ],
+    })
+  }
+
+  return groups
+})
 
 function isActive(path: string): boolean {
   if (path.startsWith('/stocks/')) {
@@ -186,3 +185,4 @@ function isActive(path: string): boolean {
   return route.path === path
 }
 </script>
+

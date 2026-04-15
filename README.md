@@ -87,6 +87,28 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/news?symbols=FPT,VCB&limit=10"
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/events?symbols=FPT,VCB&limit=10"
 ```
 
+## 4.1) Tai khoan mau de test role
+
+Neu da chay schema moi (`backend_v2/init_database.sql`), he thong co san 3 tai khoan sau:
+
+| Role | Email | Mat khau |
+|---|---|---|
+| User | user.sample@stockai.vn | User@123 |
+| Premium | premium.sample@stockai.vn | Premium@123 |
+| Admin | admin.sample@stockai.vn | Admin@123 |
+
+Tai khoan admin mac dinh:
+
+| Role | Email | Mat khau |
+|---|---|---|
+| Admin | admin@stockai.vn | admin123 |
+
+Neu DB da tao tu truoc va chua co tai khoan mau, chay lai script SQL:
+
+```powershell
+mysql -u root -p vnstock_data < backend_v2\init_database.sql
+```
+
 ## 5) API chinh
 
 | Method | Endpoint | Mo ta |
