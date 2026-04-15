@@ -49,8 +49,16 @@ VNSTOCK_API_KEY=your_vnstock_api_key
 
 # Tuy chon
 VNSTOCK_QUOTE_SOURCE=vci
-VNSTOCK_COMPANY_SOURCE=vci
+VNSTOCK_COMPANY_SOURCE=kbs
+VNSTOCK_FINANCE_SOURCE=vci
 VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS=1.05
+VNSTOCK_MAX_REQUESTS_PER_MINUTE=55
+VNSTOCK_PRELOAD_SYMBOL_LIMIT=5
+VNSTOCK_HISTORY_PRELOAD_SYMBOL_LIMIT=5
+
+# Khuyen nghi voi goi free (60 req/phut)
+# Neu van bi vuot quota, giam tiep preload hoac tat preload reference:
+# VNSTOCK_PRELOAD_REFERENCE_CACHE=false
 ```
 
 Khoi tao schema lan dau (tuy chon):

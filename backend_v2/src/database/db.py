@@ -1,9 +1,11 @@
 import logging
 import os
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -52,6 +54,42 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+def _column_exists(connection, table_name: str, column_name: str) -> bool:
+    database_name = engine.url.database
+    if not database_name:
+        return False
+
+    query = text(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = :db
+          AND table_name = :table
+          AND column_name = :column
+        LIMIT 1
+        """
+    )
+    return connection.execute(query, {"db": database_name, "table": table_name, "column": column_name}).first() is not None
+
+
+def _index_exists(connection, table_name: str, index_name: str) -> bool:
+    database_name = engine.url.database
+    if not database_name:
+        return False
+
+    query = text(
+        """
+        SELECT 1
+        FROM information_schema.statistics
+        WHERE table_schema = :db
+          AND table_name = :table
+          AND index_name = :index
+        LIMIT 1
+        """
+    )
+    return connection.execute(query, {"db": database_name, "table": table_name, "index": index_name}).first() is not None
+
+
 def _ensure_payload_columns_longtext() -> None:
     statements = [
         "ALTER TABLE company_overview_cache MODIFY COLUMN payload_json LONGTEXT NOT NULL",
@@ -70,29 +108,83 @@ def _ensure_payload_columns_longtext() -> None:
 
 
 def _ensure_user_profile_columns() -> None:
-    statements = [
-        "ALTER TABLE users MODIFY COLUMN first_name VARCHAR(120) NULL",
-        "ALTER TABLE users MODIFY COLUMN last_name VARCHAR(120) NULL",
-        "ALTER TABLE users ADD COLUMN fullname VARCHAR(255) NULL",
-        "ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL",
-        "ALTER TABLE users ADD COLUMN avatar_data LONGTEXT NULL",
-        "ALTER TABLE users ADD COLUMN role ENUM('user','premium','admin') NOT NULL DEFAULT 'user'",
-        "ALTER TABLE users ADD COLUMN is_locked TINYINT(1) NOT NULL DEFAULT 0",
-        "ALTER TABLE users ADD COLUMN locked_reason VARCHAR(500) NULL",
+    column_statements = [
+        ("avatar_data", "ALTER TABLE users ADD COLUMN avatar_data LONGTEXT NULL"),
+        ("phone", "ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL"),
+        ("fullname", "ALTER TABLE users ADD COLUMN fullname VARCHAR(255) NULL"),
+        ("role", "ALTER TABLE users ADD COLUMN role ENUM('user','premium','admin') NOT NULL DEFAULT 'user'"),
+        ("is_locked", "ALTER TABLE users ADD COLUMN is_locked TINYINT(1) NOT NULL DEFAULT 0"),
+        ("locked_reason", "ALTER TABLE users ADD COLUMN locked_reason VARCHAR(500) NULL"),
     ]
 
     with engine.begin() as connection:
-        for statement in statements:
+        for column_name, statement in column_statements:
+            if _column_exists(connection, "users", column_name):
+                continue
+            try:
+                connection.execute(text(statement))
+            except Exception as exc:
+                logger.warning("Schema update skipped for statement '%s': %s", statement, exc)
+
+        try:
+            if _column_exists(connection, "users", "phone") and not _index_exists(connection, "users", "uq_users_phone"):
+                connection.execute(text("ALTER TABLE users ADD UNIQUE KEY uq_users_phone (phone)"))
+        except Exception as exc:
+            logger.warning("Schema update skipped for statement '%s': %s", "ALTER TABLE users ADD UNIQUE KEY uq_users_phone (phone)", exc)
+
+        try:
+            if _column_exists(connection, "users", "role"):
+                connection.execute(text("UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''"))
+        except Exception as exc:
+            logger.warning("Schema update skipped for statement '%s': %s", "UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''", exc)
+
+
+def _ensure_user_portfolio_columns() -> None:
+    column_statements = [
+        ("tp_price", "ALTER TABLE user_portfolios ADD COLUMN tp_price FLOAT NULL"),
+        ("sl_price", "ALTER TABLE user_portfolios ADD COLUMN sl_price FLOAT NULL"),
+    ]
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements:
+            if _column_exists(connection, "user_portfolios", column_name):
+                continue
             try:
                 connection.execute(text(statement))
             except Exception as exc:
                 logger.warning("Schema update skipped for statement '%s': %s", statement, exc)
 
 
+def _is_transient_concurrent_ddl_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "concurrent ddl" in message or "being modified by concurrent ddl" in message
+
+
+def _create_all_with_retry(max_attempts: int = 5) -> None:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            Base.metadata.create_all(bind=engine)
+            return
+        except DBAPIError as exc:
+            if not _is_transient_concurrent_ddl_error(exc) or attempt >= max_attempts:
+                raise
+
+            # MySQL may briefly lock metadata while another DDL finishes.
+            wait_seconds = min(0.6 * attempt, 3.0)
+            logger.warning(
+                "DB schema create_all retry %s/%s after transient concurrent DDL error: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+            time.sleep(wait_seconds)
+
+
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    _create_all_with_retry()
     _ensure_payload_columns_longtext()
     _ensure_user_profile_columns()
+    _ensure_user_portfolio_columns()
 
 
 def get_db():

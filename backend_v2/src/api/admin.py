@@ -177,6 +177,8 @@ def get_all_user_portfolios(
             "symbol": p.symbol,
             "quantity": p.quantity,
             "avg_price": p.avg_price,
+            "tp_price": p.tp_price,
+            "sl_price": p.sl_price,
             "note": p.note,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         })

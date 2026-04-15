@@ -18,18 +18,58 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
 
+VN30_SYMBOLS = {
+    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
+    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
+    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE",
+}
+
+MIN_PRICE_THOUSAND = 1.0
+MAX_PRICE_THOUSAND = 1000.0
+
+
+def _normalize_symbol(symbol: str) -> str:
+    return (symbol or "").strip().upper()
+
+
+def _require_vn30_symbol(symbol: str) -> str:
+    normalized = _normalize_symbol(symbol)
+    if normalized not in VN30_SYMBOLS:
+        raise HTTPException(status_code=400, detail=f"Mã {normalized or symbol} không thuộc rổ VN30")
+    return normalized
+
+
+def _validate_price_thousand(value: Optional[float], field_name: str) -> Optional[float]:
+    if value is None:
+        return None
+
+    numeric = float(value)
+    if numeric < MIN_PRICE_THOUSAND or numeric > MAX_PRICE_THOUSAND:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field_name} phải theo đơn vị nghìn đồng/cp và nằm trong khoảng "
+                f"{MIN_PRICE_THOUSAND:g}-{MAX_PRICE_THOUSAND:g}"
+            ),
+        )
+    return numeric
+
 
 # ── Schemas ──────────────────────────────────────────────────────────
 class AddPortfolioItem(BaseModel):
     symbol: str = Field(min_length=1, max_length=50)
     quantity: int = Field(default=0, ge=0)
     avg_price: Optional[float] = None
+    tp_price: Optional[float] = Field(default=None, ge=0)
+    sl_price: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
 
 
 class UpdatePortfolioItem(BaseModel):
     quantity: Optional[int] = Field(default=None, ge=0)
     avg_price: Optional[float] = None
+    tp_price: Optional[float] = Field(default=None, ge=0)
+    sl_price: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
 
 
@@ -54,6 +94,8 @@ def get_my_portfolio(
                 "symbol": item.symbol,
                 "quantity": item.quantity,
                 "avg_price": item.avg_price,
+                "tp_price": item.tp_price,
+                "sl_price": item.sl_price,
                 "note": item.note,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
                 "updated_at": item.updated_at.isoformat() if item.updated_at else None,
@@ -70,7 +112,7 @@ def add_to_portfolio(
     db: Session = Depends(get_db),
 ):
     """Add a stock symbol to the user's portfolio."""
-    symbol = body.symbol.strip().upper()
+    symbol = _require_vn30_symbol(body.symbol)
 
     # Check if symbol already exists
     existing = (
@@ -81,11 +123,17 @@ def add_to_portfolio(
     if existing:
         raise HTTPException(status_code=400, detail=f"Mã {symbol} đã có trong danh mục")
 
+    avg_price = _validate_price_thousand(body.avg_price, "Giá TB")
+    tp_price = _validate_price_thousand(body.tp_price, "Giá TP")
+    sl_price = _validate_price_thousand(body.sl_price, "Giá SL")
+
     portfolio_item = UserPortfolio(
         user_id=current_user.id,
         symbol=symbol,
         quantity=body.quantity,
-        avg_price=body.avg_price,
+        avg_price=avg_price,
+        tp_price=tp_price,
+        sl_price=sl_price,
         note=body.note,
     )
     db.add(portfolio_item)
@@ -99,6 +147,8 @@ def add_to_portfolio(
             "symbol": portfolio_item.symbol,
             "quantity": portfolio_item.quantity,
             "avg_price": portfolio_item.avg_price,
+            "tp_price": portfolio_item.tp_price,
+            "sl_price": portfolio_item.sl_price,
             "note": portfolio_item.note,
         },
     }
@@ -112,7 +162,7 @@ def update_portfolio_item(
     db: Session = Depends(get_db),
 ):
     """Update quantity, avg_price, or note for a portfolio item."""
-    normalized = symbol.strip().upper()
+    normalized = _normalize_symbol(symbol)
     item = (
         db.query(UserPortfolio)
         .filter(UserPortfolio.user_id == current_user.id, UserPortfolio.symbol == normalized)
@@ -124,7 +174,11 @@ def update_portfolio_item(
     if body.quantity is not None:
         item.quantity = body.quantity
     if body.avg_price is not None:
-        item.avg_price = body.avg_price
+        item.avg_price = _validate_price_thousand(body.avg_price, "Giá TB")
+    if body.tp_price is not None:
+        item.tp_price = _validate_price_thousand(body.tp_price, "Giá TP")
+    if body.sl_price is not None:
+        item.sl_price = _validate_price_thousand(body.sl_price, "Giá SL")
     if body.note is not None:
         item.note = body.note
 
@@ -136,6 +190,8 @@ def update_portfolio_item(
             "symbol": item.symbol,
             "quantity": item.quantity,
             "avg_price": item.avg_price,
+            "tp_price": item.tp_price,
+            "sl_price": item.sl_price,
             "note": item.note,
         },
     }
@@ -148,7 +204,7 @@ def remove_from_portfolio(
     db: Session = Depends(get_db),
 ):
     """Remove a stock symbol from the user's portfolio."""
-    normalized = symbol.strip().upper()
+    normalized = _normalize_symbol(symbol)
     item = (
         db.query(UserPortfolio)
         .filter(UserPortfolio.user_id == current_user.id, UserPortfolio.symbol == normalized)

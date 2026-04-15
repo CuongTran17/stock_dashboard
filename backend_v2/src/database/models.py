@@ -19,7 +19,6 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
-
 class DailyOHLCV(Base):
     __tablename__ = "daily_ohlcv"
     __table_args__ = (
@@ -109,23 +108,17 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
-    first_name = Column(String(120), nullable=True)
-    last_name = Column(String(120), nullable=True)
     phone = Column(String(20), unique=True, nullable=True)
     password_hash = Column(String(255), nullable=False)
-    password_salt = Column(String(255), nullable=False, default="")
     fullname = Column(String(255), nullable=False)
-    avatar_data = Column(LONGTEXT, nullable=True)
     role = Column(
         Enum("user", "premium", "admin", name="user_role_enum"),
         nullable=False,
         default="user",
         server_default="user",
     )
-    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     is_locked = Column(Boolean, nullable=False, default=False, server_default="0")
     locked_reason = Column(String(500), nullable=True)
-    last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -172,6 +165,8 @@ class UserPortfolio(Base):
     symbol = Column(String(50), nullable=False, index=True)
     quantity = Column(Integer, nullable=False, default=0, comment="Number of shares held")
     avg_price = Column(Float, nullable=True, comment="Average purchase price")
+    tp_price = Column(Float, nullable=True, comment="Take-profit target price")
+    sl_price = Column(Float, nullable=True, comment="Stop-loss target price")
     note = Column(Text, nullable=True, comment="User note for this holding")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

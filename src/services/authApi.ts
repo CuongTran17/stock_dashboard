@@ -50,6 +50,8 @@ export interface PortfolioItem {
   symbol: string
   quantity: number
   avg_price: number | null
+  tp_price: number | null
+  sl_price: number | null
   note: string | null
   created_at?: string
   updated_at?: string
@@ -66,7 +68,14 @@ export interface SalesStats {
 
 export interface AdminUserPortfolio {
   user: { id: number; email: string; fullname: string; role: string }
-  holdings: { symbol: string; quantity: number; avg_price: number | null; note: string | null }[]
+  holdings: {
+    symbol: string
+    quantity: number
+    avg_price: number | null
+    tp_price: number | null
+    sl_price: number | null
+    note: string | null
+  }[]
   total_symbols: number
 }
 
@@ -223,17 +232,19 @@ export async function addToPortfolio(
   symbol: string,
   quantity: number = 0,
   avgPrice?: number,
+  tpPrice?: number,
+  slPrice?: number,
   note?: string,
 ): Promise<{ message: string; item: PortfolioItem }> {
   return authFetch('/api/portfolio/', {
     method: 'POST',
-    body: JSON.stringify({ symbol, quantity, avg_price: avgPrice, note }),
+    body: JSON.stringify({ symbol, quantity, avg_price: avgPrice, tp_price: tpPrice, sl_price: slPrice, note }),
   })
 }
 
 export async function updatePortfolioItem(
   symbol: string,
-  data: { quantity?: number; avg_price?: number; note?: string },
+  data: { quantity?: number; avg_price?: number; tp_price?: number; sl_price?: number; note?: string },
 ): Promise<{ message: string; item: PortfolioItem }> {
   return authFetch(`/api/portfolio/${symbol.toUpperCase()}`, {
     method: 'PUT',

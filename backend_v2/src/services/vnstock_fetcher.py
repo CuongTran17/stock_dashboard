@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import time
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -14,6 +13,8 @@ from vnstock import Quote, change_api_key
 
 from src.database.db import AsyncSessionLocal, SessionLocal
 from src.database.models import DailyOHLCV
+from src.services.vnstock_error_utils import extract_retry_after_seconds, is_rate_limit_error
+from src.services.vnstock_rate_limiter import vnstock_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ DEFAULT_HISTORY_LOOKBACK_DAYS = max(int(os.getenv("VNSTOCK_HISTORY_LOOKBACK_DAYS
 MIN_REQUEST_INTERVAL_SECONDS = max(float(os.getenv("VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS", "1.05")), 0.6)
 OUT_OF_SESSION_POLL_SECONDS = max(int(os.getenv("VNSTOCK_OUT_OF_SESSION_POLL_SECONDS", "60")), 15)
 INTRADAY_CONCURRENCY = max(int(os.getenv("VNSTOCK_INTRADAY_CONCURRENCY", "4")), 1)
-HISTORY_PRELOAD_CONCURRENCY = max(int(os.getenv("VNSTOCK_HISTORY_PRELOAD_CONCURRENCY", "3")), 1)
+HISTORY_PRELOAD_CONCURRENCY = max(int(os.getenv("VNSTOCK_HISTORY_PRELOAD_CONCURRENCY", "1")), 1)
+HISTORY_PRELOAD_SYMBOL_LIMIT = max(int(os.getenv("VNSTOCK_HISTORY_PRELOAD_SYMBOL_LIMIT", "5")), 1)
 FETCH_RETRY_ATTEMPTS = max(int(os.getenv("VNSTOCK_FETCH_RETRY_ATTEMPTS", "3")), 1)
 
 TRADING_MORNING_START = dt_time(hour=9, minute=0)
@@ -158,8 +160,6 @@ class VnstockFetcherService:
         self._known_tick_ids: Dict[str, set[str]] = {symbol: set() for symbol in VN30_SYMBOLS}
         self._stop_event = asyncio.Event()
         self._cache_lock = asyncio.Lock()
-        self._rate_lock = asyncio.Lock()
-        self._last_request_at = 0.0
         self._intraday_semaphore = asyncio.Semaphore(INTRADAY_CONCURRENCY)
         self._history_semaphore = asyncio.Semaphore(HISTORY_PRELOAD_CONCURRENCY)
 
@@ -178,11 +178,27 @@ class VnstockFetcherService:
             logger.warning("Failed to configure VNStock API key: %s", exc)
 
     async def _respect_rate_limit(self) -> None:
-        async with self._rate_lock:
-            elapsed = time.monotonic() - self._last_request_at
-            if elapsed < self.min_request_interval:
-                await asyncio.sleep(self.min_request_interval - elapsed)
-            self._last_request_at = time.monotonic()
+        await vnstock_rate_limiter.acquire()
+
+    async def _run_with_rate_limit_retry(self, action: str, symbol: str, loader: Any, *args: Any) -> Any:
+        await self._respect_rate_limit()
+        try:
+            return await asyncio.to_thread(loader, *args)
+        except BaseException as exc:
+            if not is_rate_limit_error(exc):
+                raise
+
+            retry_after = extract_retry_after_seconds(exc) + 1.0
+            logger.warning(
+                "%s rate-limited for %s. Retrying in %.1fs",
+                action,
+                symbol,
+                retry_after,
+            )
+            await asyncio.sleep(retry_after)
+
+            await self._respect_rate_limit()
+            return await asyncio.to_thread(loader, *args)
 
     async def wait_for_rate_slot(self) -> None:
         await self._respect_rate_limit()
@@ -366,9 +382,13 @@ class VnstockFetcherService:
             return False
 
         async with self._intraday_semaphore:
-            await self._respect_rate_limit()
             try:
-                frame = await asyncio.to_thread(self._fetch_intraday_sync, normalized)
+                frame = await self._run_with_rate_limit_retry(
+                    "refresh_symbol_intraday",
+                    normalized,
+                    self._fetch_intraday_sync,
+                    normalized,
+                )
                 ticks = self._normalize_intraday_rows(normalized, frame)
                 if not ticks:
                     logger.info("No intraday ticks returned for %s", normalized)
@@ -511,9 +531,10 @@ class VnstockFetcherService:
             safe_start, safe_end = safe_end, safe_start
 
         async with self._history_semaphore:
-            await self._respect_rate_limit()
             try:
-                frame = await asyncio.to_thread(
+                frame = await self._run_with_rate_limit_retry(
+                    "refresh_history_for_symbol",
+                    normalized,
                     self._fetch_history_sync,
                     normalized,
                     safe_start.isoformat(),
@@ -531,7 +552,9 @@ class VnstockFetcherService:
                 return 0
 
     async def preload_historical_data(self, symbols: Optional[List[str]] = None) -> None:
-        target_symbols = symbols or VN30_SYMBOLS
+        target_symbols = list(symbols or VN30_SYMBOLS)
+        if HISTORY_PRELOAD_SYMBOL_LIMIT > 0:
+            target_symbols = target_symbols[:HISTORY_PRELOAD_SYMBOL_LIMIT]
         logger.info("Starting historical preload for %s symbols", len(target_symbols))
 
         queue: asyncio.Queue[str] = asyncio.Queue()
