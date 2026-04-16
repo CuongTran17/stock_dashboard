@@ -4,7 +4,15 @@
  * Manages JWT authentication, user state, and API calls for auth/payment/portfolio.
  */
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+function normalizeBackendUrl(rawUrl?: string): string {
+  const value = (rawUrl || '').trim()
+  if (!value) return 'http://127.0.0.1:8000'
+  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
+  if (value.startsWith(':')) return `http://127.0.0.1${value}`
+  return `http://${value}`.replace(/\/+$/, '')
+}
+
+const BACKEND_URL = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 
 const TOKEN_KEY = 'stockai_token'
 const USER_KEY = 'stockai_user'
@@ -18,6 +26,8 @@ export interface UserInfo {
   fullname: string
   avatar_data: string | null
   role: 'user' | 'premium' | 'admin'
+  is_locked?: boolean
+  locked_reason?: string | null
   created_at?: string
 }
 
@@ -34,6 +44,19 @@ export interface PaymentInfo {
   amount: number
   transfer_content: string
   qr_url: string
+}
+
+export interface PremiumCheckoutResponse {
+  message: string
+  checkoutURL: string
+  checkoutFormFields: Record<string, string>
+  amount: number
+  transfer_content: string
+  original_amount: number
+  discount_amount: number
+  promo_code?: string | null
+  flash_sale_id?: number | null
+  flash_sale_title?: string | null
 }
 
 export interface SubscriptionStatus {
@@ -77,6 +100,61 @@ export interface AdminUserPortfolio {
     note: string | null
   }[]
   total_symbols: number
+}
+
+export interface PromotionCode {
+  id: number
+  code: string
+  title: string
+  description: string | null
+  discount_type: 'percentage' | 'fixed'
+  discount_value: number
+  min_order_amount: number | null
+  max_discount_amount: number | null
+  usage_limit: number | null
+  used_count: number
+  starts_at: string | null
+  ends_at: string | null
+  is_active: boolean
+  created_by: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PromotionPayload {
+  code: string
+  title: string
+  description?: string | null
+  discount_type: 'percentage' | 'fixed'
+  discount_value: number
+  min_order_amount?: number | null
+  max_discount_amount?: number | null
+  usage_limit?: number | null
+  starts_at?: string | null
+  ends_at?: string | null
+  is_active: boolean
+}
+
+export interface FlashSaleConfig {
+  id: number
+  title: string
+  description: string | null
+  discount_percentage: number
+  starts_at: string | null
+  ends_at: string | null
+  is_active: boolean
+  created_by: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface FlashSalePayload {
+  title: string
+  description?: string | null
+  discount_percentage: number
+  starts_at?: string | null
+  ends_at?: string | null
+  is_active: boolean
 }
 
 // ── Token Management ────────────────────────────────────────────────
@@ -218,6 +296,13 @@ export async function getPremiumPaymentInfo(): Promise<PaymentInfo> {
   return authFetch<PaymentInfo>('/api/payment/premium-info')
 }
 
+export async function createPremiumSePayCheckout(payload?: { promo_code?: string | null }): Promise<PremiumCheckoutResponse> {
+  return authFetch<PremiumCheckoutResponse>('/api/payment/create-checkout', {
+    method: 'POST',
+    body: JSON.stringify({ promo_code: payload?.promo_code || null }),
+  })
+}
+
 export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
   return authFetch<SubscriptionStatus>('/api/payment/subscription-status')
 }
@@ -290,4 +375,72 @@ export async function lockUser(userId: number, reason: string): Promise<{ messag
 
 export async function unlockUser(userId: number): Promise<{ message: string }> {
   return authFetch(`/api/admin/users/${userId}/unlock`, { method: 'PUT' })
+}
+
+export async function getAdminPromotions(): Promise<{ promotions: PromotionCode[] }> {
+  return authFetch('/api/admin/promotions')
+}
+
+export async function createPromotion(payload: PromotionPayload): Promise<{ message: string; promotion: PromotionCode }> {
+  return authFetch('/api/admin/promotions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updatePromotion(
+  promotionId: number,
+  payload: PromotionPayload,
+): Promise<{ message: string; promotion: PromotionCode }> {
+  return authFetch(`/api/admin/promotions/${promotionId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function setPromotionStatus(
+  promotionId: number,
+  isActive: boolean,
+): Promise<{ message: string; promotion: PromotionCode }> {
+  return authFetch(`/api/admin/promotions/${promotionId}/status?is_active=${isActive}`, {
+    method: 'PATCH',
+  })
+}
+
+export async function deletePromotion(promotionId: number): Promise<{ message: string }> {
+  return authFetch(`/api/admin/promotions/${promotionId}`, { method: 'DELETE' })
+}
+
+export async function getAdminFlashSales(): Promise<{ flash_sales: FlashSaleConfig[] }> {
+  return authFetch('/api/admin/flash-sales')
+}
+
+export async function createFlashSale(payload: FlashSalePayload): Promise<{ message: string; flash_sale: FlashSaleConfig }> {
+  return authFetch('/api/admin/flash-sales', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function updateFlashSale(
+  flashSaleId: number,
+  payload: FlashSalePayload,
+): Promise<{ message: string; flash_sale: FlashSaleConfig }> {
+  return authFetch(`/api/admin/flash-sales/${flashSaleId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function setFlashSaleStatus(
+  flashSaleId: number,
+  isActive: boolean,
+): Promise<{ message: string; flash_sale: FlashSaleConfig }> {
+  return authFetch(`/api/admin/flash-sales/${flashSaleId}/status?is_active=${isActive}`, {
+    method: 'PATCH',
+  })
+}
+
+export async function deleteFlashSale(flashSaleId: number): Promise<{ message: string }> {
+  return authFetch(`/api/admin/flash-sales/${flashSaleId}`, { method: 'DELETE' })
 }

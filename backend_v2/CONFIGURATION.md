@@ -123,6 +123,23 @@ WARNING:src.services.vnstock_fetcher:refresh_symbol_intraday rate-limited for VC
 - `VNSTOCK_COMPANY_SOURCE` - "kbs" (recommended) or "vci"
 - `VNSTOCK_QUOTE_SOURCE` - "vci" (default, for intraday/history)
 
+### SePay Checkout
+- `SEPAY_ENV` - "sandbox" or "production"
+- `SEPAY_MERCHANT_ID` - Merchant ID do SePay cap
+- `SEPAY_SECRET_KEY` - Secret key do SePay cap
+- `SEPAY_BANK_NAME` - Ma ngan hang nhan tien, vi du `MB`
+- `SEPAY_BANK_ACCOUNT` - So tai khoan nhan tien
+- `SEPAY_ACCOUNT_NAME` - Ten chu tai khoan
+- `FRONTEND_URL` - URL frontend de quay ve trang checkout/return
+- `BACKEND_URL` - URL backend chinh
+- `SEPAY_IPN_URL` - URL IPN SePay se go ve backend
+- `IPN_URL` - Alias runtime cho `SEPAY_IPN_URL`, dung khi script ngrok inject tu dong
+
+### ngrok Local IPN
+- `IPN_PORT` - Cong chay IPN/ngrok local (mac dinh 3001)
+- `NGROK_AUTHTOKEN` - Authtoken cua ngrok dashboard
+- `NGROK_DEV_DOMAIN` - Domain ngrok da reserve de nhan IPN local
+
 ### Preload Configuration
 - `VNSTOCK_PRELOAD_REFERENCE_CACHE` - Enable/disable company data preload (default: true)
 - `VNSTOCK_PRELOAD_FORCE_REFRESH` - Force refresh on startup (default: false)

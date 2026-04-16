@@ -8,8 +8,6 @@
         <img :src="avatarSrc" alt="User" class="h-full w-full object-cover" />
       </span>
 
-      <span class="block mr-1 font-medium text-theme-sm">{{ displayName }}</span>
-
       <ChevronDownIcon :class="{ 'rotate-180': dropdownOpen }" />
     </button>
 
@@ -20,7 +18,7 @@
     >
       <div>
         <span class="block font-medium text-gray-700 text-theme-sm dark:text-gray-400">
-          {{ displayName }}
+          Tài khoản
         </span>
         <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
           {{ displayEmail }}
@@ -68,12 +66,10 @@ const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 
 const currentUser = computed(() => getSavedUser())
-const displayName = computed(() => currentUser.value?.fullname || 'Khách')
 const displayEmail = computed(() => currentUser.value?.email || '')
 const avatarSrc = computed(() => currentUser.value?.avatar_data || '/images/user/owner.jpg')
 
 const menuItems = [
-  { href: '/profile', icon: UserCircleIcon, text: 'Tài khoản của tôi' },
   { href: '/my-portfolio', icon: UserCircleIcon, text: 'Danh mục của tôi' },
   { href: '/screener', icon: SettingsIcon, text: 'Lọc cổ phiếu' },
   { href: '/news-events', icon: InfoCircleIcon, text: 'Tin tức thị trường' },

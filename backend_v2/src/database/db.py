@@ -109,9 +109,14 @@ def _ensure_payload_columns_longtext() -> None:
 
 def _ensure_user_profile_columns() -> None:
     column_statements = [
+        ("first_name", "ALTER TABLE users ADD COLUMN first_name VARCHAR(120) NULL"),
+        ("last_name", "ALTER TABLE users ADD COLUMN last_name VARCHAR(120) NULL"),
         ("avatar_data", "ALTER TABLE users ADD COLUMN avatar_data LONGTEXT NULL"),
         ("phone", "ALTER TABLE users ADD COLUMN phone VARCHAR(20) NULL"),
         ("fullname", "ALTER TABLE users ADD COLUMN fullname VARCHAR(255) NULL"),
+        ("password_salt", "ALTER TABLE users ADD COLUMN password_salt VARCHAR(255) NULL"),
+        ("is_active", "ALTER TABLE users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1"),
+        ("last_login_at", "ALTER TABLE users ADD COLUMN last_login_at DATETIME NULL"),
         ("role", "ALTER TABLE users ADD COLUMN role ENUM('user','premium','admin') NOT NULL DEFAULT 'user'"),
         ("is_locked", "ALTER TABLE users ADD COLUMN is_locked TINYINT(1) NOT NULL DEFAULT 0"),
         ("locked_reason", "ALTER TABLE users ADD COLUMN locked_reason VARCHAR(500) NULL"),
@@ -137,6 +142,30 @@ def _ensure_user_profile_columns() -> None:
                 connection.execute(text("UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''"))
         except Exception as exc:
             logger.warning("Schema update skipped for statement '%s': %s", "UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''", exc)
+
+        try:
+            if _column_exists(connection, "users", "is_active"):
+                connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))
+        except Exception as exc:
+            logger.warning("Schema update skipped for statement '%s': %s", "UPDATE users SET is_active = 1 WHERE is_active IS NULL", exc)
+
+
+def _ensure_subscription_columns() -> None:
+    column_statements = [
+        ("original_amount", "ALTER TABLE user_subscriptions ADD COLUMN original_amount DECIMAL(12,2) NULL"),
+        ("discount_amount", "ALTER TABLE user_subscriptions ADD COLUMN discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0"),
+        ("promo_code", "ALTER TABLE user_subscriptions ADD COLUMN promo_code VARCHAR(50) NULL"),
+        ("flash_sale_id", "ALTER TABLE user_subscriptions ADD COLUMN flash_sale_id INT NULL"),
+    ]
+
+    with engine.begin() as connection:
+        for column_name, statement in column_statements:
+            if _column_exists(connection, "user_subscriptions", column_name):
+                continue
+            try:
+                connection.execute(text(statement))
+            except Exception as exc:
+                logger.warning("Schema update skipped for statement '%s': %s", statement, exc)
 
 
 def _ensure_user_portfolio_columns() -> None:
@@ -184,6 +213,7 @@ def init_db():
     _create_all_with_retry()
     _ensure_payload_columns_longtext()
     _ensure_user_profile_columns()
+    _ensure_subscription_columns()
     _ensure_user_portfolio_columns()
 
 

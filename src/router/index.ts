@@ -60,6 +60,18 @@ const router = createRouter({
       component: () => import('../views/PremiumUpgrade.vue'),
       meta: { title: 'Nâng cấp Premium', requiresAuth: true },
     },
+    {
+      path: '/premium/checkout',
+      name: 'PremiumCheckout',
+      component: () => import('../views/PremiumCheckout.vue'),
+      meta: { title: 'Checkout Premium', requiresAuth: true },
+    },
+    {
+      path: '/premium/sepay-return',
+      name: 'PremiumSePayReturn',
+      component: () => import('../views/PremiumSePayReturn.vue'),
+      meta: { title: 'Kết quả thanh toán Premium', requiresAuth: true },
+    },
 
     // ── User Portfolio Management ───────────────────────────────
     {
@@ -71,16 +83,10 @@ const router = createRouter({
 
     // ── Admin Routes ────────────────────────────────────────────
     {
-      path: '/admin/sales',
-      name: 'AdminSalesDashboard',
-      component: () => import('../views/Admin/SalesDashboard.vue'),
-      meta: { title: 'Quản trị doanh thu', requiresAuth: true, requiresAdmin: true },
-    },
-    {
-      path: '/admin/portfolios',
-      name: 'AdminCustomerPortfolios',
-      component: () => import('../views/Admin/CustomerPortfolios.vue'),
-      meta: { title: 'Danh mục khách hàng', requiresAuth: true, requiresAdmin: true },
+      path: '/admin',
+      name: 'AdminDashboard',
+      component: () => import('../views/Admin/AdminDashboard.vue'),
+      meta: { title: 'Quản trị hệ thống', requiresAuth: true, requiresAdmin: true },
     },
 
     // ── Auth Routes ─────────────────────────────────────────────

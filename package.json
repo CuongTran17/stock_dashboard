@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 5174 --strictPort",
+    "backend:ngrok": "cd backend_v2 && ..\\.venv\\Scripts\\python.exe run_with_ngrok.py",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",

@@ -114,11 +114,10 @@ import {
   BellIcon,
   MailIcon,
   ChatIcon,
+  PieChartIcon,
   UserCircleIcon,
   LogoutIcon,
-  PieChartIcon,
   BoxCubeIcon,
-  UserGroupIcon,
 } from '../../icons'
 import StockChartIcon from '@/icons/StockChartIcon.vue'
 import { useSidebar } from '@/composables/useSidebar'
@@ -159,7 +158,7 @@ const menuGroups = computed(() => {
 
     userItems.push({ icon: LogoutIcon, name: 'Đăng xuất', path: '/logout' })
 
-    groups.push({ title: user?.fullname || 'Tài khoản', items: userItems })
+    groups.push({ title: 'Tài khoản', items: userItems })
   } else {
     groups.push({
       title: 'Tài khoản',
@@ -175,8 +174,7 @@ const menuGroups = computed(() => {
     groups.push({
       title: 'Quản trị',
       items: [
-        { icon: PieChartIcon, name: 'Doanh thu Premium', path: '/admin/sales' },
-        { icon: UserGroupIcon, name: 'Danh mục khách hàng', path: '/admin/portfolios' },
+        { icon: LayoutDashboardIcon, name: 'Quản trị hệ thống', path: '/admin' },
       ],
     })
   }

@@ -67,14 +67,30 @@ Khoi tao schema lan dau (tuy chon):
 .\.venv\Scripts\python.exe backend_v2\test_db.py
 ```
 
-## 3) Chay du an (2 terminal)
+## 3) Chay du an (3 terminal neu dung AI Kaggle)
+
+### Terminal 0 - Kaggle AI Server (bat truoc)
+
+- Mo Kaggle notebook dang host Trading-R1 va bam Run all de khoi dong API.
+- Dam bao ngrok tunnel trong notebook dang hoat dong.
+- Cap nhat `KAGGLE_API_URL` trong `backend_v2/.env` theo domain ngrok moi nhat.
+- Giu notebook o trang thai Running trong suot qua trinh test endpoint AI.
+
+Neu khong dung endpoint AI (`/api/analysis/{symbol}/generate`) thi co the bo qua buoc nay.
 
 ### Terminal 1 - Backend
 
 ```powershell
-cd backend_v2
-..\.venv\Scripts\python.exe -m uvicorn src.main:app --host 127.0.0.1 --port 8000 --reload
+npm run backend:ngrok
 ```
+
+Lenh tren se tu dong:
+- Chay FastAPI trong `backend_v2` tren port `BACKEND_PORT` (mac dinh 8000)
+- Mo ngrok voi `NGROK_DEV_DOMAIN`
+- Inject runtime URL:
+	- `BACKEND_URL=https://<NGROK_DEV_DOMAIN>`
+	- `IPN_URL=https://<NGROK_DEV_DOMAIN>/api/payment/sepay/webhook`
+	- `SEPAY_IPN_URL=https://<NGROK_DEV_DOMAIN>/api/payment/sepay/webhook`
 
 ### Terminal 2 - Frontend
 
@@ -84,6 +100,7 @@ cd backend_v2
 
 Frontend: http://127.0.0.1:5173  
 Backend: http://127.0.0.1:8000
+Backend public (ngrok): https://<NGROK_DEV_DOMAIN>
 
 ## 4) Kiem tra nhanh
 
@@ -93,6 +110,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/stocks"
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/stocks/snapshots?symbols=FPT,VCB"
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/news?symbols=FPT,VCB&limit=10"
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/events?symbols=FPT,VCB&limit=10"
+```
+
+Test nhanh qua public ngrok URL (dung `NGROK_DEV_DOMAIN`):
+
+```powershell
+Invoke-RestMethod -Uri "https://<NGROK_DEV_DOMAIN>/api/health"
+Invoke-RestMethod -Uri "https://<NGROK_DEV_DOMAIN>/api/stocks"
 ```
 
 ## 4.1) Tai khoan mau de test role
@@ -117,6 +141,17 @@ Neu DB da tao tu truoc va chua co tai khoan mau, chay lai script SQL:
 mysql -u root -p vnstock_data < backend_v2\init_database.sql
 ```
 
+### 4.2) Khoa / mo khoa nguoi dung (Admin)
+
+- Vao trang ` /admin?tab=users `
+- Admin co the:
+  - Khoa tai khoan va nhap ly do khoa
+  - Mo khoa tai khoan da bi khoa
+  - Xem ly do khoa ngay trong bang nguoi dung
+- Luu y:
+  - Tai khoan bi khoa se khong the dang nhap hoac goi API can xac thuc
+  - Admin khong the tu khoa tai khoan cua chinh minh
+
 ## 5) API chinh
 
 | Method | Endpoint | Mo ta |
@@ -138,18 +173,110 @@ mysql -u root -p vnstock_data < backend_v2\init_database.sql
 - `/api/ws/dnse`: route tuong thich frontend hien tai
 - `/api/ws/market`: stream cache intraday theo symbol
 
-## 6) TradingView trong trang chi tiet
+## 6) Premium + SePay checkout
+
+Trang Premium da co luong thanh toan 2 buoc:
+- `Premium` -> `Checkout` -> `SePay`
+- Callback thanh cong / huy / loi quay ve trang `Premium SePay Return`
+
+## 6.1) Trading-R1 AI Integration (Kaggle)
+
+Backend_v2 co the goi Kaggle Trading-R1 model (fine-tuned Qwen3.5-2B) de phan tich co phieu.
+
+### Cau hinh backend_v2 cho Kaggle
+
+File: `backend_v2/.env`
+
+```env
+# Kaggle Trading-R1 ngrok tunnel (chay tren Kaggle notebook)
+# PHAI GIU NOTEBOOK CHAY DE MAINTAIN TUNNEL
+KAGGLE_API_URL=https://exterior-vaguely-resisting.ngrok-free.dev
+```
+
+### API Endpoint
+
+```
+POST /api/analysis/{symbol}/generate
+
+Parameters:
+  - symbol: Stock code (e.g., FPT, VCB, VHM)
+  - user_id: Optional user ID
+  - force: Optional boolean to force refresh
+
+Response:
+{
+  "status": "ok",
+  "symbol": "FPT",
+  "decision": "BUY",
+  "confidence": 0.75,
+  "reasoning": "...",
+  "current_price": 259.20,
+  "analysis": {
+    "technical": "SMA7: 247.98, SMA21: 242.04, RSI: 51.86, MACD: 4.3411",
+    "price_change": 12.5,
+    "price_change_pct": 5.08
+  },
+  "model_version": "Trading-R1/Qwen3.5-2B"
+}
+```
+
+### Test
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/analysis/FPT/generate" -Method Post
+Invoke-RestMethod -Uri "https://<NGROK_DEV_DOMAIN>/api/analysis/VCB/generate" -Method Post
+```
+
+### Cau hinh backend_v2 cho SePay
+
+File: `backend_v2/.env`
+
+```env
+SEPAY_ENV=sandbox
+SEPAY_MERCHANT_ID=SP-TEST-TD54A554
+SEPAY_SECRET_KEY=spsk_test_41D8f24AyGBisC86uHtT4F8zEDvRHUF8
+SEPAY_BANK_NAME=MB
+SEPAY_BANK_ACCOUNT=
+SEPAY_ACCOUNT_NAME=
+FRONTEND_URL=http://localhost:5173
+BACKEND_URL=http://localhost:8000
+IPN_PORT=3001
+NGROK_AUTHTOKEN=
+NGROK_DEV_DOMAIN=
+IPN_URL=
+SEPAY_IPN_URL=
+```
+
+### Chay local voi ngrok de nhan IPN
+
+Khi test thanh toan local, dung script:
+
+```powershell
+npm run backend:ngrok
+```
+
+Script se:
+- Chay backend FastAPI tren port 8000
+- Mo tunnel ngrok theo `NGROK_DEV_DOMAIN`
+- Tu inject `BACKEND_URL`, `IPN_URL` va `SEPAY_IPN_URL` vao runtime backend
+- Cho SePay go IPN ve URL dang `https://<ngrok-domain>/api/payment/sepay/webhook`
+
+Luu y:
+- Neu chua co SePay merchant that, backend van co sandbox default de test luong checkout.
+- Khi len production, doi `SEPAY_ENV=production` va dien `SEPAY_MERCHANT_ID`/`SEPAY_SECRET_KEY` dung thong tin SePay cap.
+
+## 7) TradingView trong trang chi tiet
 
 - Trang `StockDetail` da tich hop chart bang thu vien `TradingView Lightweight Charts`.
 - Co dropdown chuyen nhanh giua cac ma VN30 ngay trong trang chi tiet.
 
-## 7) Build production frontend
+## 8) Build production frontend
 
 ```powershell
 npm run build
 ```
 
-## 8) Thu muc luu tru ma cu
+## 9) Thu muc luu tru ma cu
 
 Code backend cu va script test cu da duoc chuyen vao:
 
@@ -159,7 +286,7 @@ Code backend cu va script test cu da duoc chuyen vao:
 
 Khong co file nao bi xoa, chi di chuyen de codebase sach hon.
 
-## 9) Xu ly loi thuong gap
+## 10) Xu ly loi thuong gap
 
 PowerShell chan script `.ps1`:
 

@@ -384,6 +384,7 @@ interface GeneratedAnalysis {
   conclusion: string
   factors: string[]
   updatedAt: string
+  rawOutput: string
 }
 
 interface BacktestRecord {
@@ -411,7 +412,15 @@ const tabList: Array<{ key: AnalysisTab; label: string }> = [
   { key: 'conclusion', label: 'Conclusion' },
 ]
 
-const BACKEND_FALLBACK = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+function normalizeBackendUrl(rawUrl?: string): string {
+  const value = (rawUrl || '').trim()
+  if (!value) return 'http://127.0.0.1:8000'
+  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
+  if (value.startsWith(':')) return `http://127.0.0.1${value}`
+  return `http://${value}`.replace(/\/+$/, '')
+}
+
+const BACKEND_FALLBACK = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 const POSITIVE_TOKENS = [
   'tang',
   'tich cuc',
@@ -689,6 +698,7 @@ function createEmptyAnalysis(): GeneratedAnalysis {
     conclusion: '',
     factors: [],
     updatedAt: new Date(0).toISOString(),
+    rawOutput: '',
   }
 }
 
@@ -803,6 +813,93 @@ function toHtmlBlock(text: string, fallback: string): string {
   }
 
   return `<p>${escapeHtml(content).replace(/\n/g, '<br>')}</p>`
+}
+
+function extractTaggedSection(rawText: string, tagName: string): string {
+  if (!rawText.trim()) {
+    return ''
+  }
+
+  const tagPattern = new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*<\/${tagName}>`, 'i')
+  const tagMatch = rawText.match(tagPattern)
+  if (tagMatch?.[1]) {
+    return tagMatch[1].trim()
+  }
+
+  const fallbackPattern = new RegExp(`<${tagName}>\\s*([\\s\\S]*?)(?:\n<[^>]+>|$)`, 'i')
+  const fallbackMatch = rawText.match(fallbackPattern)
+  return fallbackMatch?.[1]?.trim() || ''
+}
+
+function extractKeyFactors(rawText: string): string[] {
+  if (!rawText.trim()) {
+    return []
+  }
+
+  const bracketMatch = rawText.match(/KEY_FACTORS\s*:\s*\[(.*?)\]/i)
+  if (bracketMatch?.[1]) {
+    return bracketMatch[1]
+      .split(',')
+      .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean)
+  }
+
+  const listMatch = rawText.match(/KEY_FACTORS\s*:\s*([\s\S]*?)(?:\n(?:FINAL DECISION|CONFIDENCE)|<\/think>|<\|think\|>|$)/i)
+  if (!listMatch?.[1]) {
+    return []
+  }
+
+  return listMatch[1]
+    .split('\n')
+    .map((line) => line.trim().replace(/^[\-\*\d\.\)\s]+/, ''))
+    .filter(Boolean)
+}
+
+function normalizeConfidencePercent(value: unknown, fallback: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+
+  if (numeric >= 0 && numeric <= 1) {
+    return numeric * 100
+  }
+
+  return numeric
+}
+
+function buildKaggleFullBullets(rawText: string, decision: string, confidence: number, keyFactors: string[]): string {
+  const technical = extractTaggedSection(rawText, 'TechnicalAnalysis')
+  const fundamentals = extractTaggedSection(rawText, 'Fundamentals')
+  const sentiment = extractTaggedSection(rawText, 'NewsSentiment')
+  const conclusion = extractTaggedSection(rawText, 'Conclusion')
+
+  const bulletLines = [
+    `- Decision: ${decision}`,
+    `- Confidence: ${Number.isFinite(confidence) ? `${confidence}%` : 'N/A'}`,
+  ]
+
+  if (technical) {
+    bulletLines.push(`- Technical Analysis: ${technical}`)
+  }
+
+  if (fundamentals) {
+    bulletLines.push(`- Fundamentals: ${fundamentals}`)
+  }
+
+  if (sentiment) {
+    bulletLines.push(`- News Sentiment: ${sentiment}`)
+  }
+
+  if (conclusion) {
+    bulletLines.push(`- Conclusion: ${conclusion}`)
+  }
+
+  if (keyFactors.length > 0) {
+    bulletLines.push(`- Key Factors: ${keyFactors.join('; ')}`)
+  }
+
+  return bulletLines.join('\n')
 }
 
 function normalizeText(input: string): string {
@@ -1238,6 +1335,7 @@ function buildAnalysis(): GeneratedAnalysis {
     conclusion: conclusionLines.join('\n'),
     factors: [...new Set(factorPool)].slice(0, 6),
     updatedAt: new Date().toISOString(),
+    rawOutput: '',
   }
 }
 
@@ -1556,7 +1654,59 @@ async function generateAnalysis(notify: boolean): Promise<void> {
   loadingMessage.value = 'Đang phân tích dữ liệu kỹ thuật và tin tức...'
 
   try {
-    analysis.value = buildAnalysis()
+    // Call Kaggle Trading-R1 API from backend_v2
+    const apiUrl = `http://127.0.0.1:8000/api/analysis/${selectedSymbol.value}/generate`
+    
+    try {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      
+      if (response.ok) {
+        const aiResult = await response.json()
+        
+        // Build local analysis with AI data
+        const localAnalysis = buildAnalysis()
+        const rawKaggleOutput = String(
+          aiResult.raw_output ||
+          aiResult.rawOutput ||
+          aiResult.reasoning ||
+          aiResult.conclusion ||
+          ''
+        )
+        const apiKeyFactors = Array.isArray(aiResult.key_factors)
+          ? aiResult.key_factors.map((item: unknown) => String(item).trim()).filter(Boolean)
+          : []
+        const parsedKeyFactors = apiKeyFactors.length > 0 ? apiKeyFactors : extractKeyFactors(rawKaggleOutput)
+        
+        // Override with AI decision if available
+        if (aiResult.decision) {
+          localAnalysis.decision = aiResult.decision as Decision
+          localAnalysis.confidence = normalizeConfidencePercent(aiResult.confidence, localAnalysis.confidence)
+          localAnalysis.rawOutput = rawKaggleOutput
+          localAnalysis.full = rawKaggleOutput
+            ? buildKaggleFullBullets(rawKaggleOutput, localAnalysis.decision, localAnalysis.confidence, parsedKeyFactors)
+            : `[AI] ${aiResult.reasoning || localAnalysis.full}`
+          localAnalysis.technical = extractTaggedSection(rawKaggleOutput, 'TechnicalAnalysis') || localAnalysis.technical
+          localAnalysis.fundamental = extractTaggedSection(rawKaggleOutput, 'Fundamentals') || localAnalysis.fundamental
+          localAnalysis.sentiment = extractTaggedSection(rawKaggleOutput, 'NewsSentiment') || localAnalysis.sentiment
+          localAnalysis.conclusion = extractTaggedSection(rawKaggleOutput, 'Conclusion') || aiResult.reasoning || localAnalysis.conclusion
+          localAnalysis.factors = parsedKeyFactors.length > 0 ? parsedKeyFactors : localAnalysis.factors
+          localAnalysis.model = `${aiResult.model_version || 'Trading-R1'} + Local TA`
+        }
+        
+        analysis.value = localAnalysis
+      } else {
+        // Fallback to local analysis if API fails
+        analysis.value = buildAnalysis()
+      }
+    } catch (apiErr) {
+      console.error('Kaggle API error, using local analysis:', apiErr)
+      // Fallback to local analysis
+      analysis.value = buildAnalysis()
+    }
+    
     backtestRecords.value = buildBacktestRecords()
 
     if (notify) {
