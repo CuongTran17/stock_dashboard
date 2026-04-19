@@ -146,12 +146,19 @@ def run(cfg: EtlConfig) -> Path:
         encoding="utf-8-sig",
         float_format="%.6f",
     )
+    
+    # Save parquet for high performance
+    parquet_out = cfg.output_file.with_suffix(".parquet")
+    dataset.to_parquet(parquet_out, index=False)
 
     snapshot = cfg.processed_dir / f"market_data_{cfg.run_id}.csv"
+    snapshot_parquet = cfg.processed_dir / f"market_data_{cfg.run_id}.parquet"
+    
     shutil.copy2(cfg.output_file, snapshot)
+    shutil.copy2(parquet_out, snapshot_parquet)
 
     log.info(
-        "Done: %s rows=%d range=%s..%s symbols=%s snapshot=%s",
+        "Done: %s & .parquet rows=%d range=%s..%s symbols=%s snapshot=%s",
         cfg.output_file,
         len(dataset),
         dataset["data_date"].min(),
