@@ -34,6 +34,19 @@ legacy/
 vnstock-agent-guide/
 .vercel
 
+# Generated data files (run ETL pipeline to regenerate)
+market_data.csv
+market_data_raw_text*.csv
+lake/
+
+# Academic/personal documents (not part of the project)
+*.docx
+*.pdf
+
+# Planning docs (content in git history)
+ETL_IMPROVEMENT_ROADMAP.md
+implementation_plan.md
+
 # Python backend cache and environments
 __pycache__/
 *.py[cod]
@@ -41,3 +54,9 @@ __pycache__/
 *.pyd
 .venv/
 backend_v2/.venv/
+
+# Environment files with secrets - never commit
+backend_v2/.env
+.env
+!.env.example
+!backend_v2/.env.example

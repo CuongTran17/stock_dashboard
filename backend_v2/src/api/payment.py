@@ -181,14 +181,19 @@ def _calculate_discount_amount(base_amount: int, discount_type: str, discount_va
     return max(0, discount)
 
 
+def _as_utc(dt: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware (treat naive datetimes as UTC)."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
 def _calculate_promo_discount(promo: PromotionCode, subtotal: int) -> int:
     now = datetime.now(timezone.utc)
 
     if not promo.is_active:
         raise HTTPException(status_code=400, detail="Mã khuyến mãi đã bị tắt")
-    if promo.starts_at and promo.starts_at > now:
+    if promo.starts_at and _as_utc(promo.starts_at) > now:
         raise HTTPException(status_code=400, detail="Mã khuyến mãi chưa có hiệu lực")
-    if promo.ends_at and promo.ends_at < now:
+    if promo.ends_at and _as_utc(promo.ends_at) < now:
         raise HTTPException(status_code=400, detail="Mã khuyến mãi đã hết hạn")
     if promo.usage_limit is not None and promo.used_count >= promo.usage_limit:
         raise HTTPException(status_code=400, detail="Mã khuyến mãi đã hết lượt sử dụng")

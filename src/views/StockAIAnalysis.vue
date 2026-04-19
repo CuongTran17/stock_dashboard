@@ -146,9 +146,34 @@
         </section>
 
         <section
-          class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
+          class="relative col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
           :class="currentView === 'dashboard' ? 'xl:col-span-4' : 'xl:col-span-5'"
         >
+          <!-- Premium lock overlay -->
+          <div
+            v-if="!isPremium()"
+            class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 rounded-2xl backdrop-blur-sm bg-white/60 dark:bg-gray-900/70"
+          >
+            <div class="flex flex-col items-center gap-3 px-6 text-center dark:text-gray-100">
+              <div class="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-gray-500 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <p class="text-base font-semibold text-gray-800 dark:text-white/90">Tính năng này đang bị khóa</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">Vui lòng nâng cấp lên <span class="font-semibold text-brand-600 dark:text-brand-400">Premium</span> để sử dụng phân tích AI.</p>
+              <a
+                href="/premium"
+                class="mt-1 inline-flex items-center gap-2 rounded-xl bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600"
+              >
+                Nâng cấp Premium
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                </svg>
+              </a>
+            </div>
+          </div>
+
           <div class="mb-4 flex items-center justify-between">
             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">AI Brain Explorer</h2>
             <button
@@ -357,6 +382,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import { isPremium } from '@/services/authApi'
 import { VN30_TICKERS } from '@/composables/useStockData'
 import {
   stockBackendApi,
@@ -414,7 +440,7 @@ const tabList: Array<{ key: AnalysisTab; label: string }> = [
 
 function normalizeBackendUrl(rawUrl?: string): string {
   const value = (rawUrl || '').trim()
-  if (!value) return 'http://127.0.0.1:8000'
+  if (!value) return ''
   if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
   if (value.startsWith(':')) return `http://127.0.0.1${value}`
   return `http://${value}`.replace(/\/+$/, '')
@@ -1655,7 +1681,7 @@ async function generateAnalysis(notify: boolean): Promise<void> {
 
   try {
     // Call Kaggle Trading-R1 API from backend_v2
-    const apiUrl = `http://127.0.0.1:8000/api/analysis/${selectedSymbol.value}/generate`
+    const apiUrl = `${BACKEND_FALLBACK}/api/analysis/${selectedSymbol.value}/generate`
     
     try {
       const response = await fetch(apiUrl, {

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -33,7 +33,7 @@ class DailyOHLCV(Base):
     low = Column(Float, nullable=False, default=0.0)
     close = Column(Float, nullable=False, default=0.0)
     volume = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class TechnicalCache(Base):
@@ -51,7 +51,7 @@ class TechnicalCache(Base):
     history_last_time = Column(String(32), nullable=True)
     payload_json = Column(LONGTEXT, nullable=False)
     source = Column(String(64), nullable=False, default="mysql")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
 
 class CompanyOverviewCache(Base):
@@ -60,7 +60,7 @@ class CompanyOverviewCache(Base):
     symbol = Column(String(50), primary_key=True)
     payload_json = Column(LONGTEXT, nullable=False)
     source = Column(String(64), nullable=False, default="vnstock")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
 
 class FinancialReportCache(Base):
@@ -75,7 +75,7 @@ class FinancialReportCache(Base):
     row_count = Column(Integer, nullable=False, default=0)
     payload_json = Column(LONGTEXT, nullable=False)
     source = Column(String(64), nullable=False, default="vnstock")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
 
 class NewsCache(Base):
@@ -85,7 +85,7 @@ class NewsCache(Base):
     item_count = Column(Integer, nullable=False, default=0)
     payload_json = Column(LONGTEXT, nullable=False)
     source = Column(String(64), nullable=False, default="vnstock")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
 
 class EventsCache(Base):
@@ -95,7 +95,7 @@ class EventsCache(Base):
     item_count = Column(Integer, nullable=False, default=0)
     payload_json = Column(LONGTEXT, nullable=False)
     source = Column(String(64), nullable=False, default="vnstock")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
 
 # =====================================================================
@@ -125,8 +125,8 @@ class User(Base):
     is_locked = Column(Boolean, nullable=False, default=False, server_default="0")
     locked_reason = Column(String(500), nullable=True)
     last_login_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     subscriptions = relationship("UserSubscription", back_populates="user", lazy="dynamic")
@@ -156,8 +156,8 @@ class UserSubscription(Base):
     flash_sale_id = Column(Integer, ForeignKey("flash_sales.id", ondelete="SET NULL"), nullable=True)
     started_at = Column(DateTime, nullable=True, comment="When premium access was activated")
     expires_at = Column(DateTime, nullable=True, comment="When premium access expires")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="subscriptions")
@@ -178,8 +178,8 @@ class UserPortfolio(Base):
     tp_price = Column(Float, nullable=True, comment="Take-profit target price")
     sl_price = Column(Float, nullable=True, comment="Stop-loss target price")
     note = Column(Text, nullable=True, comment="User note for this holding")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="portfolios")
@@ -196,7 +196,7 @@ class AIPrediction(Base):
     confidence = Column(Float, nullable=True, comment="Model confidence score 0-1")
     reasoning = Column(Text, nullable=True, comment="AI reasoning / chain of thought")
     model_version = Column(String(100), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
 
 
 class FlashSale(Base):
@@ -211,8 +211,8 @@ class FlashSale(Base):
     ends_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class PromotionCode(Base):
@@ -241,5 +241,5 @@ class PromotionCode(Base):
     ends_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="1")
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)

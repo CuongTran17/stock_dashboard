@@ -6,7 +6,7 @@
 
 function normalizeBackendUrl(rawUrl?: string): string {
   const value = (rawUrl || '').trim()
-  if (!value) return 'http://127.0.0.1:8000'
+  if (!value) return ''
   if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
   if (value.startsWith(':')) return `http://127.0.0.1${value}`
   return `http://${value}`.replace(/\/+$/, '')

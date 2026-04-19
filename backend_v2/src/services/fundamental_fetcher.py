@@ -274,7 +274,7 @@ class FundamentalFetcherService:
                     row.item_count = len(payload) if isinstance(payload, list) else 0
                 if hasattr(row, "source"):
                     row.source = source
-                row.updated_at = datetime.utcnow()
+                row.updated_at = datetime.now(timezone.utc)
 
                 db.add(row)
                 await db.commit()
@@ -320,7 +320,7 @@ class FundamentalFetcherService:
                 row.row_count = len(records)
                 row.payload_json = self._json_dumps(records)
                 row.source = source
-                row.updated_at = datetime.utcnow()
+                row.updated_at = datetime.now(timezone.utc)
 
                 db.add(row)
                 await db.commit()

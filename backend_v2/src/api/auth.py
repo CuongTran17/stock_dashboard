@@ -8,9 +8,14 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt as _bcrypt_mod
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.context import CryptContext
+
+# passlib reads bcrypt.__about__.__version__ but newer bcrypt removed __about__
+if not hasattr(_bcrypt_mod, '__about__'):
+    _bcrypt_mod.__about__ = type('_about', (), {'__version__': getattr(_bcrypt_mod, '__version__', '4.0.0')})()
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
@@ -25,6 +30,9 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 JWT_SECRET = os.getenv("JWT_SECRET", "stockai_jwt_secret_change_me_in_production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
+
+if JWT_SECRET == "stockai_jwt_secret_change_me_in_production":
+    logger.warning("JWT_SECRET is using the insecure default value. Set JWT_SECRET in .env before deploying.")
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
@@ -65,7 +73,7 @@ class ProfileUpdateRequest(BaseModel):
     last_name: Optional[str] = None
     fullname: Optional[str] = None
     phone: Optional[str] = None
-    avatar_data: Optional[str] = Field(default=None, max_length=12_000_000)
+    avatar_data: Optional[str] = Field(default=None, max_length=2_000_000)
 
 
 class PasswordUpdateRequest(BaseModel):
@@ -95,21 +103,6 @@ def _decode_token(token: str) -> dict:
 
 
 # ── Dependencies ─────────────────────────────────────────────────────
-def get_current_user(db: Session = Depends(get_db), authorization: Optional[str] = None) -> User:
-    """FastAPI dependency: extract & verify JWT, return User ORM object."""
-    from fastapi import Request
-
-    # This will be injected via middleware or header
-    raise HTTPException(status_code=401, detail="Not implemented via dependency directly")
-
-
-async def get_current_user_from_header(
-    db: Session = Depends(get_db),
-) -> User:
-    """Placeholder – actual logic is in require_auth below."""
-    raise HTTPException(status_code=401)
-
-
 from fastapi import Request
 
 
@@ -227,7 +220,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     if hasattr(user, "is_active") and user.is_active is False:
         raise HTTPException(status_code=403, detail="Tài khoản đã bị vô hiệu hóa")
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
 

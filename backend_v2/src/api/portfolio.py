@@ -13,16 +13,11 @@ from sqlalchemy.orm import Session
 from src.api.auth import require_auth
 from src.database.db import get_db
 from src.database.models import User, UserPortfolio
+from src.services.vnstock_fetcher import VN30_SYMBOL_SET as VN30_SYMBOLS
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/portfolio", tags=["Portfolio"])
-
-VN30_SYMBOLS = {
-    "ACB", "BCM", "BID", "BVH", "CTG", "FPT", "GAS", "GVR", "HDB", "HPG",
-    "MBB", "MSN", "MWG", "PLX", "POW", "SAB", "SHB", "SSB", "SSI", "STB",
-    "TCB", "TPB", "VCB", "VHM", "VIB", "VIC", "VJC", "VNM", "VPB", "VRE",
-}
 
 MIN_PRICE_THOUSAND = 1.0
 MAX_PRICE_THOUSAND = 1000.0

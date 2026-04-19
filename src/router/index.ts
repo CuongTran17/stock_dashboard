@@ -50,7 +50,7 @@ const router = createRouter({
       path: '/ai-analysis',
       name: 'StockAIAnalysis',
       component: () => import('../views/StockAIAnalysis.vue'),
-      meta: { title: 'Phân tích cổ phiếu bằng AI', requiresAuth: true, requiresPremium: true },
+      meta: { title: 'Phân tích cổ phiếu bằng AI', requiresAuth: true },
     },
 
     // ── Premium Upgrade ─────────────────────────────────────────

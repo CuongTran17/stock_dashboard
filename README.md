@@ -1,307 +1,406 @@
-# VN30 Stock Dashboard (Vue + FastAPI V2)
+# VNStock Dashboard
 
-He thong theo doi VN30 voi:
-- Frontend: Vue 3 + TypeScript
-- Backend: FastAPI (`backend_v2`) + MySQL
-- Du lieu: vnstock (history, intraday, news, events)
-- Realtime: WebSocket (`/api/ws/dnse`, `/api/ws/market`)
+Ứng dụng theo dõi thị trường chứng khoán Việt Nam (VN30) theo thời gian thực, tích hợp phân tích AI, quản lý danh mục đầu tư và thanh toán nâng cấp Premium.
 
-## Kien truc hien tai
+---
 
-- Backend chinh dang dung: `backend_v2`
-- Backend cu khong bi xoa, da duoc dua vao thu muc luu tru: `legacy/`
-- Danh sach ma co phieu: chi VN30 (30 ma)
-- Du lieu lich su: luu vao MySQL (`daily_ohlcv`)
-- Du lieu intraday: cap nhat nen + broadcast realtime
-	- Chi goi intraday trong gio giao dich: Thu 2-Thu 6, 09:00-11:30 va 13:00-15:00 (Asia/Ho_Chi_Minh)
-- Cuoi phien: gom tick trong ngay thanh OHLCV de ghi DB
+## Tổng quan kiến trúc
 
-## Yeu cau he thong
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Frontend (Vue 3 + TypeScript + Tailwind CSS 4 + Vite 6)    │
+│  Port: 5174                                                  │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ REST API + WebSocket
+┌─────────────────────▼───────────────────────────────────────┐
+│  Backend (FastAPI 0.116 + Python 3.11+)                     │
+│  Port: 8000                                                  │
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐   │
+│  │  MySQL 8     │  │  Redis 7+    │  │  Data Lake      │   │
+│  │  (chính)     │  │  (tùy chọn) │  │  Parquet/EOD    │   │
+│  └──────────────┘  └──────────────┘  └─────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
 
-| Thanh phan | Toi thieu |
+---
+
+## Tính năng chính
+
+| Tính năng | Mô tả |
 |---|---|
+| **Thị trường thời gian thực** | WebSocket push dữ liệu tick VN30 mỗi giây |
+| **VN30 Dashboard** | Bảng giá tổng quan, lọc/sắp xếp, sparkline |
+| **Stock Screener** | Lọc cổ phiếu theo các tiêu chí kỹ thuật |
+| **Chi tiết cổ phiếu** | Biểu đồ OHLCV, chỉ số tài chính, tin tức, sự kiện |
+| **Phân tích AI** | Tín hiệu BUY/SELL/HOLD từ mô hình Trading-R1 |
+| **Danh mục cá nhân** | Watchlist với giá TB, TP, SL, ghi chú |
+| **Premium** | Nâng cấp tài khoản qua SePay (QR/chuyển khoản) |
+| **Admin Panel** | Quản lý người dùng, xem đơn hàng, khóa tài khoản |
+| **EOD Aggregation** | Tự động gộp tick intraday thành nến ngày lúc 15:15 |
+
+---
+
+## Yêu cầu hệ thống
+
+| Thành phần | Phiên bản tối thiểu |
+|---|---|
+| Python | 3.11+ |
 | Node.js | 18+ |
-| npm | 9+ |
-| Python | 3.10+ |
-| MySQL | 8+ |
+| MySQL | 8.0+ |
+| Redis | 7.0+ (tùy chọn — có fallback in-memory) |
 
-## 1) Cai dat
+---
 
-### Frontend
+## Cài đặt
 
-```powershell
+### 1. Clone dự án
+
+```bash
+git clone <repository-url>
+cd tailadmin-vuejs-1.0.0
+```
+
+### 2. Cài đặt Backend
+
+```bash
+cd backend_v2
+
+# Tạo virtual environment
+python -m venv .venv
+
+# Kích hoạt (Windows)
+.venv\Scripts\activate
+# Kích hoạt (Linux/macOS)
+source .venv/bin/activate
+
+# Cài đặt dependencies
+pip install -r requirements.txt
+```
+
+### 3. Cấu hình môi trường Backend
+
+```bash
+# Sao chép file cấu hình mẫu
+cp .env.example .env
+```
+
+Chỉnh sửa `.env` với các giá trị thực:
+
+```env
+# ======= MYSQL DATABASE CONFIGURATION =======
+MYSQL_URL=mysql+mysqlconnector://root:YOUR_PASSWORD@localhost/vnstock_data
+
+# ======= JWT SECURITY =======
+JWT_SECRET=change_me_to_a_long_random_string_at_least_32_chars
+JWT_EXPIRE_HOURS=24
+
+# ======= VNSTOCK VIP CONFIGURATION ========
+VNSTOCK_API_KEY=your_dnse_api_key_here
+
+# ======= SEPAY PAYMENT CONFIGURATION ========
+SEPAY_ENV=sandbox
+SEPAY_MERCHANT_ID=SP-LIVE-XXXXXXXX
+SEPAY_SECRET_KEY=spsk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SEPAY_BANK_NAME=MB
+SEPAY_BANK_ACCOUNT=0123456789
+SEPAY_ACCOUNT_NAME=NGUYEN VAN A
+
+# ======= URL CONFIGURATION =======
+FRONTEND_URL=http://localhost:5174
+BACKEND_URL=http://localhost:8000
+
+# ======= REDIS (tùy chọn) =======
+REDIS_URL=redis://localhost:6379/0
+
+# ======= KAGGLE TRADING-R1 AI =======
+KAGGLE_API_URL=https://your-kaggle-ngrok.ngrok-free.dev
+```
+
+### 4. Khởi tạo Database MySQL
+
+```bash
+# Tạo database và các bảng
+mysql -u root -p < init_database.sql
+```
+
+Hoặc kết nối MySQL thủ công và chạy nội dung file `init_database.sql`.
+
+> **Lưu ý**: Backend sẽ tự động tạo các bảng còn thiếu khi khởi động qua SQLAlchemy `create_all()`, nhưng chạy file SQL đảm bảo đầy đủ index.
+
+### 5. Cài đặt Frontend
+
+```bash
+# Quay lại thư mục gốc
+cd ..
+
+# Cài đặt Node.js dependencies
 npm install
 ```
 
-### Backend V2
+---
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r backend_v2\requirements.txt
+## Chạy dự án
+
+### Khởi động Backend
+
+```bash
+cd backend_v2
+
+# Kích hoạt virtual environment nếu chưa
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # Linux/macOS
+
+# Chạy server
+python run.py
 ```
 
-## 2) Cau hinh backend_v2
+Server chạy tại: `http://localhost:8000`  
+API docs (Swagger): `http://localhost:8000/docs`
 
-File: `backend_v2/.env`
+### Khởi động Frontend
+
+```bash
+# Từ thư mục gốc của dự án
+npm run dev
+```
+
+Ứng dụng chạy tại: `http://localhost:5174`
+
+---
+
+## Cấu trúc dự án
+
+```
+tailadmin-vuejs-1.0.0/
+├── src/                          # Frontend Vue 3
+│   ├── views/
+│   │   ├── MarketOverview.vue    # Bảng giá VN30
+│   │   ├── StockDashboard.vue    # Dashboard tổng quan
+│   │   ├── StockDetail.vue       # Chi tiết cổ phiếu
+│   │   ├── StockScreener.vue     # Bộ lọc cổ phiếu
+│   │   ├── StockAIAnalysis.vue   # Phân tích AI
+│   │   ├── MyPortfolio.vue       # Danh mục cá nhân
+│   │   ├── PortfolioAlerts.vue   # Cảnh báo TP/SL
+│   │   ├── PremiumUpgrade.vue    # Nâng cấp Premium
+│   │   ├── PremiumCheckout.vue   # Thanh toán
+│   │   ├── PremiumSePayReturn.vue # Kết quả thanh toán
+│   │   ├── Profile.vue           # Thông tin cá nhân
+│   │   ├── NewsEvents.vue        # Tin tức & sự kiện
+│   │   └── Admin/                # Trang Admin
+│   ├── services/
+│   │   ├── authApi.ts            # API xác thực
+│   │   ├── stockBackendApi.ts    # API dữ liệu cổ phiếu
+│   │   ├── dnseApi.ts            # API DNSE
+│   │   └── dnseWebSocket.ts      # WebSocket client
+│   ├── composables/              # Vue composables
+│   ├── components/               # Shared components
+│   └── router/                   # Vue Router routes
+│
+├── backend_v2/
+│   ├── src/
+│   │   ├── main.py               # FastAPI app entry point
+│   │   ├── jobs.py               # APScheduler + app lifespan
+│   │   ├── utils.py              # Pure helpers
+│   │   ├── cache.py              # DB cache helpers
+│   │   ├── api/
+│   │   │   ├── auth.py           # /api/auth/* (login, register, me)
+│   │   │   ├── admin.py          # /api/admin/* (quản lý user)
+│   │   │   ├── payment.py        # /api/payment/* (SePay)
+│   │   │   └── portfolio.py      # /api/portfolio/* (danh mục)
+│   │   ├── routes/
+│   │   │   ├── stocks.py         # /api/stocks/* (OHLCV, intraday)
+│   │   │   ├── analysis.py       # /api/analysis/* (AI, technical)
+│   │   │   ├── market.py         # /api/market-indices/*, /api/news
+│   │   │   ├── websocket.py      # /api/ws/market (WebSocket)
+│   │   │   └── internal.py       # /api/dnse/*, /api/debug/* (admin only)
+│   │   ├── services/
+│   │   │   ├── vnstock_fetcher.py   # VN30 intraday fetcher + Redis tick cache
+│   │   │   └── fundamental_fetcher.py # Dữ liệu cơ bản, BCTC, kỹ thuật
+│   │   └── database/
+│   │       ├── db.py             # SQLAlchemy engine + session
+│   │       ├── models.py         # ORM models
+│   │       ├── redis_db.py       # Redis client (lazy proxy)
+│   │       └── data_lake.py      # Parquet EOD dump
+│   ├── data_lake/                # Parquet files (tự tạo khi chạy)
+│   │   └── ticks/YYYY-MM-DD/SYMBOL.parquet
+│   ├── init_database.sql         # Script khởi tạo MySQL
+│   ├── requirements.txt
+│   ├── run.py                    # Entry point thường
+│   └── run_with_ngrok.py         # Entry point cho IPN webhook
+└── package.json                  # Frontend dependencies
+```
+
+---
+
+## Tài khoản mặc định
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@vnstock.vn` | `admin123` |
+| Premium | `premium@vnstock.vn` | `premium123` |
+| User | `user@vnstock.vn` | `user123` |
+
+> **Bảo mật**: Đổi mật khẩu ngay sau lần đăng nhập đầu tiên ở môi trường production.
+
+---
+
+## API Endpoints chính
+
+### Authentication
+```
+POST /api/auth/register            Đăng ký tài khoản
+POST /api/auth/login               Đăng nhập → JWT token
+GET  /api/auth/me                  Thông tin user hiện tại
+PUT  /api/auth/profile             Cập nhật hồ sơ
+PUT  /api/auth/change-password     Đổi mật khẩu
+```
+
+### Dữ liệu thị trường
+```
+GET  /api/stocks/vn30              Snapshot giá VN30
+GET  /api/stocks/intraday/{symbol} Dữ liệu intraday
+GET  /api/stocks/history/{symbol}  Lịch sử OHLCV
+WS   /api/ws/market                WebSocket stream VN30
+```
+
+### Phân tích
+```
+GET  /api/analysis/fundamental/{symbol}  Dữ liệu cơ bản
+GET  /api/analysis/financial/{symbol}    Báo cáo tài chính
+GET  /api/analysis/technical/{symbol}    Phân tích kỹ thuật
+POST /api/analysis/ai/{symbol}           Phân tích AI (Premium)
+```
+
+### Danh mục
+```
+GET    /api/portfolio/             Danh mục của tôi
+POST   /api/portfolio/             Thêm cổ phiếu
+PUT    /api/portfolio/{symbol}     Cập nhật
+DELETE /api/portfolio/{symbol}     Xóa
+```
+
+### Thanh toán Premium
+```
+POST /api/payment/sepay/create          Tạo đơn thanh toán
+GET  /api/payment/sepay/status/{ref}    Kiểm tra trạng thái
+POST /api/payment/sepay/webhook         IPN callback từ SePay
+```
+
+### Admin
+```
+GET  /api/admin/users              Danh sách người dùng
+PUT  /api/admin/users/{id}/lock    Khóa tài khoản
+PUT  /api/admin/users/{id}/unlock  Mở khóa tài khoản
+GET  /api/admin/subscriptions      Danh sách đơn hàng
+```
+
+---
+
+## Cấu hình nâng cao
+
+### Bật SePay Webhook với ngrok (local dev)
+
+Khi cần test IPN webhook từ SePay trên máy local:
+
+```bash
+cd backend_v2
+
+# Cấu hình thêm vào .env:
+NGROK_AUTHTOKEN=your_ngrok_authtoken_here
+NGROK_DEV_DOMAIN=your-subdomain.ngrok-free.dev
+IPN_URL=https://your-subdomain.ngrok-free.dev/api/payment/sepay/webhook
+
+# Chạy với ngrok
+python run_with_ngrok.py
+```
+
+### Cấu hình preload dữ liệu tham chiếu
 
 ```env
-MYSQL_URL=mysql+mysqlconnector://root:your_password@localhost/vnstock_data
-VNSTOCK_API_KEY=your_vnstock_api_key
+# Bật/tắt preload khi khởi động (mặc định: true)
+VNSTOCK_PRELOAD_REFERENCE_CACHE=true
 
-# Tuy chon
-VNSTOCK_QUOTE_SOURCE=vci
-VNSTOCK_COMPANY_SOURCE=kbs
-VNSTOCK_FINANCE_SOURCE=vci
-VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS=1.05
-VNSTOCK_MAX_REQUESTS_PER_MINUTE=55
+# Force refresh dù đã có cache (mặc định: false)
+VNSTOCK_PRELOAD_FORCE_REFRESH=false
+
+# Số symbol preload khi khởi động (mặc định: 5, tối đa: 30)
 VNSTOCK_PRELOAD_SYMBOL_LIMIT=5
-VNSTOCK_HISTORY_PRELOAD_SYMBOL_LIMIT=5
-
-# Khuyen nghi voi goi free (60 req/phut)
-# Neu van bi vuot quota, giam tiep preload hoac tat preload reference:
-# VNSTOCK_PRELOAD_REFERENCE_CACHE=false
 ```
 
-Khoi tao schema lan dau (tuy chon):
+### Redis (tùy chọn nhưng khuyến nghị)
 
-```powershell
-.\.venv\Scripts\python.exe backend_v2\test_db.py
+Nếu không có Redis, hệ thống tự động dùng fallback in-memory. Tick data sẽ mất khi restart server.
+
+```bash
+# Chạy Redis qua Docker
+docker run -d -p 6379:6379 redis:7-alpine
 ```
 
-## 3) Chay du an (3 terminal neu dung AI Kaggle)
+---
 
-### Terminal 0 - Kaggle AI Server (bat truoc)
+## Cấu trúc database
 
-- Mo Kaggle notebook dang host Trading-R1 va bam Run all de khoi dong API.
-- Dam bao ngrok tunnel trong notebook dang hoat dong.
-- Cap nhat `KAGGLE_API_URL` trong `backend_v2/.env` theo domain ngrok moi nhat.
-- Giu notebook o trang thai Running trong suot qua trinh test endpoint AI.
+| Bảng | Mô tả |
+|---|---|
+| `daily_ohlcv` | Dữ liệu nến ngày OHLCV (được gộp tự động 15:15) |
+| `company_overview_cache` | Cache tổng quan doanh nghiệp |
+| `financial_report_cache` | Cache báo cáo tài chính |
+| `technical_cache` | Cache dữ liệu phân tích kỹ thuật |
+| `news_cache` | Cache tin tức theo mã |
+| `events_cache` | Cache sự kiện doanh nghiệp |
+| `users` | Tài khoản người dùng |
+| `user_subscriptions` | Lịch sử thanh toán Premium |
+| `user_portfolios` | Danh mục cổ phiếu cá nhân |
+| `ai_predictions` | Kết quả phân tích AI |
+| `flash_sales` | Chương trình Flash Sale |
+| `promo_codes` | Mã chiết khấu |
 
-Neu khong dung endpoint AI (`/api/analysis/{symbol}/generate`) thi co the bo qua buoc nay.
+---
 
-### Terminal 1 - Backend
+## Tech Stack
 
-```powershell
-npm run backend:ngrok
-```
+**Frontend**
+- Vue 3 (Composition API)
+- TypeScript
+- Tailwind CSS 4
+- Vite 6
+- Pinia (state management)
+- Vue Router 4
 
-Lenh tren se tu dong:
-- Chay FastAPI trong `backend_v2` tren port `BACKEND_PORT` (mac dinh 8000)
-- Mo ngrok voi `NGROK_DEV_DOMAIN`
-- Inject runtime URL:
-	- `BACKEND_URL=https://<NGROK_DEV_DOMAIN>`
-	- `IPN_URL=https://<NGROK_DEV_DOMAIN>/api/payment/sepay/webhook`
-	- `SEPAY_IPN_URL=https://<NGROK_DEV_DOMAIN>/api/payment/sepay/webhook`
+**Backend**
+- FastAPI 0.116
+- SQLAlchemy 2.0 (ORM)
+- MySQL 8 (MySQL Connector)
+- Redis 7+ (tick cache — optional)
+- APScheduler (EOD cron job)
+- PyJWT + passlib/bcrypt (auth)
+- vnstock 3.5+ (nguồn dữ liệu)
+- PyArrow/Parquet (data lake EOD)
+- httpx + tenacity (HTTP với retry)
 
-### Terminal 2 - Frontend
+**Payment**
+- SePay (QR Banking)
 
-```powershell
-	npm run dev -- --host 127.0.0.1 --port 5173
-```
+**AI**
+- Kaggle Trading-R1 (external API)
 
-Frontend: http://127.0.0.1:5173  
-Backend: http://127.0.0.1:8000
-Backend public (ngrok): https://<NGROK_DEV_DOMAIN>
+---
 
-## 4) Kiem tra nhanh
+## Build cho Production
 
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/health"
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/stocks"
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/stocks/snapshots?symbols=FPT,VCB"
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/news?symbols=FPT,VCB&limit=10"
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/events?symbols=FPT,VCB&limit=10"
-```
+### Frontend
 
-Test nhanh qua public ngrok URL (dung `NGROK_DEV_DOMAIN`):
-
-```powershell
-Invoke-RestMethod -Uri "https://<NGROK_DEV_DOMAIN>/api/health"
-Invoke-RestMethod -Uri "https://<NGROK_DEV_DOMAIN>/api/stocks"
-```
-
-## 4.1) Tai khoan mau de test role
-
-Neu da chay schema moi (`backend_v2/init_database.sql`), he thong co san 3 tai khoan sau:
-
-| Role | Email | Mat khau |
-|---|---|---|
-| User | user.sample@stockai.vn | User@123 |
-| Premium | premium.sample@stockai.vn | Premium@123 |
-| Admin | admin.sample@stockai.vn | Admin@123 |
-
-Tai khoan admin mac dinh:
-
-| Role | Email | Mat khau |
-|---|---|---|
-| Admin | admin@stockai.vn | admin123 |
-
-Neu DB da tao tu truoc va chua co tai khoan mau, chay lai script SQL:
-
-```powershell
-mysql -u root -p vnstock_data < backend_v2\init_database.sql
-```
-
-### 4.2) Khoa / mo khoa nguoi dung (Admin)
-
-- Vao trang ` /admin?tab=users `
-- Admin co the:
-  - Khoa tai khoan va nhap ly do khoa
-  - Mo khoa tai khoan da bi khoa
-  - Xem ly do khoa ngay trong bang nguoi dung
-- Luu y:
-  - Tai khoan bi khoa se khong the dang nhap hoac goi API can xac thuc
-  - Admin khong the tu khoa tai khoan cua chinh minh
-
-## 5) API chinh
-
-| Method | Endpoint | Mo ta |
-|---|---|---|
-| GET | `/api/health` | Trang thai backend + DB |
-| GET | `/api/stocks` | Danh sach VN30 |
-| GET | `/api/stocks/snapshots` | Snapshot realtime cho danh sach ma |
-| GET | `/api/stocks/{symbol}/overview` | Tong quan ma |
-| GET | `/api/stocks/{symbol}/history` | Lich su gia tu MySQL |
-| GET | `/api/stocks/{symbol}/technical` | TA tinh tu du lieu history |
-| GET | `/api/stocks/{symbol}/financials` | Stub (chua day du) |
-| GET | `/api/market-indices` | Tong hop chi so thi truong |
-| GET | `/api/news` | Tin tuc tu `Company.news()` |
-| GET | `/api/events` | Su kien tu `Company.events()` |
-| POST | `/api/dnse/save-quotes` | Nhan quote realtime tu frontend |
-
-### WebSocket
-
-- `/api/ws/dnse`: route tuong thich frontend hien tai
-- `/api/ws/market`: stream cache intraday theo symbol
-
-## 6) Premium + SePay checkout
-
-Trang Premium da co luong thanh toan 2 buoc:
-- `Premium` -> `Checkout` -> `SePay`
-- Callback thanh cong / huy / loi quay ve trang `Premium SePay Return`
-
-## 6.1) Trading-R1 AI Integration (Kaggle)
-
-Backend_v2 co the goi Kaggle Trading-R1 model (fine-tuned Qwen3.5-2B) de phan tich co phieu.
-
-### Cau hinh backend_v2 cho Kaggle
-
-File: `backend_v2/.env`
-
-```env
-# Kaggle Trading-R1 ngrok tunnel (chay tren Kaggle notebook)
-# PHAI GIU NOTEBOOK CHAY DE MAINTAIN TUNNEL
-KAGGLE_API_URL=https://exterior-vaguely-resisting.ngrok-free.dev
-```
-
-### API Endpoint
-
-```
-POST /api/analysis/{symbol}/generate
-
-Parameters:
-  - symbol: Stock code (e.g., FPT, VCB, VHM)
-  - user_id: Optional user ID
-  - force: Optional boolean to force refresh
-
-Response:
-{
-  "status": "ok",
-  "symbol": "FPT",
-  "decision": "BUY",
-  "confidence": 0.75,
-  "reasoning": "...",
-  "current_price": 259.20,
-  "analysis": {
-    "technical": "SMA7: 247.98, SMA21: 242.04, RSI: 51.86, MACD: 4.3411",
-    "price_change": 12.5,
-    "price_change_pct": 5.08
-  },
-  "model_version": "Trading-R1/Qwen3.5-2B"
-}
-```
-
-### Test
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/analysis/FPT/generate" -Method Post
-Invoke-RestMethod -Uri "https://<NGROK_DEV_DOMAIN>/api/analysis/VCB/generate" -Method Post
-```
-
-### Cau hinh backend_v2 cho SePay
-
-File: `backend_v2/.env`
-
-```env
-SEPAY_ENV=sandbox
-SEPAY_MERCHANT_ID=SP-TEST-TD54A554
-SEPAY_SECRET_KEY=spsk_test_41D8f24AyGBisC86uHtT4F8zEDvRHUF8
-SEPAY_BANK_NAME=MB
-SEPAY_BANK_ACCOUNT=
-SEPAY_ACCOUNT_NAME=
-FRONTEND_URL=http://localhost:5173
-BACKEND_URL=http://localhost:8000
-IPN_PORT=3001
-NGROK_AUTHTOKEN=
-NGROK_DEV_DOMAIN=
-IPN_URL=
-SEPAY_IPN_URL=
-```
-
-### Chay local voi ngrok de nhan IPN
-
-Khi test thanh toan local, dung script:
-
-```powershell
-npm run backend:ngrok
-```
-
-Script se:
-- Chay backend FastAPI tren port 8000
-- Mo tunnel ngrok theo `NGROK_DEV_DOMAIN`
-- Tu inject `BACKEND_URL`, `IPN_URL` va `SEPAY_IPN_URL` vao runtime backend
-- Cho SePay go IPN ve URL dang `https://<ngrok-domain>/api/payment/sepay/webhook`
-
-Luu y:
-- Neu chua co SePay merchant that, backend van co sandbox default de test luong checkout.
-- Khi len production, doi `SEPAY_ENV=production` va dien `SEPAY_MERCHANT_ID`/`SEPAY_SECRET_KEY` dung thong tin SePay cap.
-
-## 7) TradingView trong trang chi tiet
-
-- Trang `StockDetail` da tich hop chart bang thu vien `TradingView Lightweight Charts`.
-- Co dropdown chuyen nhanh giua cac ma VN30 ngay trong trang chi tiet.
-
-## 8) Build production frontend
-
-```powershell
+```bash
 npm run build
+# Output: dist/
 ```
 
-## 9) Thu muc luu tru ma cu
+### Backend
 
-Code backend cu va script test cu da duoc chuyen vao:
-
-- `legacy/backend_v1`
-- `legacy/backend_old`
-- `legacy/legacy_tests`
-
-Khong co file nao bi xoa, chi di chuyen de codebase sach hon.
-
-## 10) Xu ly loi thuong gap
-
-PowerShell chan script `.ps1`:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```bash
+# Chạy với uvicorn production
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-Port 8000/5173 dang bi chiem:
-
-```powershell
-netstat -ano | findstr LISTENING | findstr ":8000 :5173"
-Stop-Process -Id <PID> -Force
-```
-
-MySQL ket noi that bai:
-
-- Kiem tra `MYSQL_URL` trong `backend_v2/.env`
-- Dam bao DB `vnstock_data` ton tai va user co quyen
+> **Lưu ý**: Đặt `allow_origins` trong CORS thành domain cụ thể thay vì `"*"` trong `backend_v2/src/main.py` khi deploy production.

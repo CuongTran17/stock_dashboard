@@ -6,7 +6,7 @@
 
 function normalizeBackendUrl(rawUrl?: string): string {
   const value = (rawUrl || '').trim()
-  if (!value) return 'http://127.0.0.1:8000'
+  if (!value) return ''
   if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
   if (value.startsWith(':')) return `http://127.0.0.1${value}`
   return `http://${value}`.replace(/\/+$/, '')
@@ -220,6 +220,18 @@ async function authFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }))
     const msg = body.detail || body.error || body.message || `Error ${response.status}`
+
+    if (response.status === 401) {
+      removeToken()
+      if (!path.includes('/auth/login') && !path.includes('/auth/register')) {
+        window.location.href = '/auth/signin'
+      }
+    } else if (response.status === 403 && msg.includes('khóa')) {
+      // Locked account — clear token so UI doesn't keep retrying
+      removeToken()
+      window.location.href = '/auth/signin?locked=1'
+    }
+
     throw new Error(msg)
   }
 

@@ -16,9 +16,13 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // Proxy backend API calls to avoid CORS in dev.
+      '/api': {
+        target: process.env.VITE_BACKEND_URL || 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+      },
       // Proxy DNSE REST API calls through Vite to avoid browser CORS in dev.
-      // e.g. /dnse-proxy/dnse-market-data-service/api/stocks/FPT
-      //   → https://services.entrade.com.vn/dnse-market-data-service/api/stocks/FPT
       '/dnse-proxy': {
         target: 'https://services.entrade.com.vn',
         changeOrigin: true,

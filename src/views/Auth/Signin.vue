@@ -278,7 +278,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import CommonGridShape from '@/components/common/CommonGridShape.vue'
 import FullScreenLayout from '@/components/layout/FullScreenLayout.vue'
@@ -292,6 +292,12 @@ const showPassword = ref(false)
 const keepLoggedIn = ref(false)
 const isSubmitting = ref(false)
 const errorMsg = ref('')
+
+onMounted(() => {
+  if (route.query.locked === '1') {
+    errorMsg.value = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.'
+  }
+})
 
 const togglePasswordVisibility = () => {
   showPassword.value = !showPassword.value

@@ -54,14 +54,13 @@
         Không có người dùng phù hợp với bộ lọc hiện tại.
       </div>
 
-      <div v-else class="overflow-hidden">
-        <table class="w-full min-w-[1080px]">
+      <div v-else class="overflow-x-auto">
+        <table class="w-full min-w-[860px]">
           <thead class="bg-gray-50 dark:bg-gray-800/80">
             <tr>
               <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">ID</th>
               <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Họ tên</th>
-              <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Email</th>
-              <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Điện thoại</th>
+              <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Email / Điện thoại</th>
               <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Quyền hạn</th>
               <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Trạng thái</th>
               <th class="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Thao tác</th>
@@ -74,8 +73,10 @@
                 <div class="font-semibold text-gray-800 dark:text-gray-200">{{ user.fullname }}</div>
                 <div v-if="isCurrentUser(user.id)" class="mt-1 text-xs text-brand-600 dark:text-brand-400">Tài khoản hiện tại</div>
               </td>
-              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ user.email }}</td>
-              <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ user.phone || '—' }}</td>
+              <td class="px-6 py-4">
+                <div class="text-sm text-gray-600 dark:text-gray-400">{{ user.email }}</div>
+                <div class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{{ user.phone || '—' }}</div>
+              </td>
               <td class="px-6 py-4">
                 <select
                   :value="user.role"

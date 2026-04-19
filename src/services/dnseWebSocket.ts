@@ -20,7 +20,10 @@ export interface RealtimeQuote {
 type QuoteCallback = (quote: RealtimeQuote) => void
 type ConnectionCallback = (status: 'connected' | 'disconnected' | 'error' | 'fallback') => void
 
-const WS_URL = 'ws://127.0.0.1:8000/api/ws/dnse'
+const _backendBase = (import.meta.env.VITE_BACKEND_URL || '').trim().replace(/\/+$/, '')
+const WS_URL = _backendBase
+  ? _backendBase.replace(/^http/, 'ws') + '/api/ws/dnse'
+  : `ws://${window.location.host}/api/ws/dnse`
 const RECONNECT_DELAY = 3000
 const MAX_RECONNECT_ATTEMPTS = 2
 const HEARTBEAT_INTERVAL = 30000

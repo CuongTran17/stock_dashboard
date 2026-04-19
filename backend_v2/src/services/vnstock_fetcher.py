@@ -1,7 +1,8 @@
 import asyncio
+import json
 import logging
 import os
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -11,8 +12,10 @@ from sqlalchemy.dialects.mysql import insert as mysql_insert
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from vnstock import Quote, change_api_key
 
+from src.database.data_lake import dump_ticks_to_parquet
 from src.database.db import AsyncSessionLocal, SessionLocal
 from src.database.models import DailyOHLCV
+from src.database.redis_db import get_redis
 from src.services.vnstock_error_utils import extract_retry_after_seconds, is_rate_limit_error
 from src.services.vnstock_rate_limiter import vnstock_rate_limiter
 
@@ -141,8 +144,6 @@ def _empty_snapshot(symbol: str) -> Dict[str, Any]:
 
 
 # In-memory caches used by API + websocket handlers.
-intraday_cache: Dict[str, List[Dict[str, Any]]] = {symbol: [] for symbol in VN30_SYMBOLS}
-latest_snapshot_cache: Dict[str, Dict[str, Any]] = {symbol: _empty_snapshot(symbol) for symbol in VN30_SYMBOLS}
 
 
 class VnstockFetcherService:
@@ -158,6 +159,9 @@ class VnstockFetcherService:
         self.last_history_sync_at: Dict[str, str] = {}
 
         self._known_tick_ids: Dict[str, set[str]] = {symbol: set() for symbol in VN30_SYMBOLS}
+        # In-memory fallback used when Redis is unavailable
+        self._intraday_mem: Dict[str, List[Dict[str, Any]]] = {symbol: [] for symbol in VN30_SYMBOLS}
+        self._snapshot_mem: Dict[str, Dict[str, Any]] = {symbol: _empty_snapshot(symbol) for symbol in VN30_SYMBOLS}
         self._stop_event = asyncio.Event()
         self._cache_lock = asyncio.Lock()
         self._intraday_semaphore = asyncio.Semaphore(INTRADAY_CONCURRENCY)
@@ -304,15 +308,18 @@ class VnstockFetcherService:
         return ticks
 
     def _rebuild_snapshot_from_ticks(self, symbol: str) -> None:
-        ticks = intraday_cache.get(symbol, [])
+        r = get_redis()
+        if r:
+            raw = r.lrange(f"intraday:{symbol}", 0, -1)
+            ticks = [json.loads(x) for x in raw]
+        else:
+            ticks = list(self._intraday_mem.get(symbol, []))
+
         if not ticks:
             return
 
         today = datetime.now(tz=VN_TZ).date()
-        todays_ticks = [
-            tick for tick in ticks
-            if _to_date(tick.get("time")) == today
-        ]
+        todays_ticks = [tick for tick in ticks if _to_date(tick.get("time")) == today]
         target_ticks = todays_ticks or ticks
         if not target_ticks:
             return
@@ -323,14 +330,19 @@ class VnstockFetcherService:
         low_price = min(_to_float(tick.get("price")) for tick in target_ticks)
         total_volume = sum(_to_int(tick.get("volume")) for tick in target_ticks)
 
-        previous_ref = _to_float(latest_snapshot_cache.get(symbol, {}).get("refPrice"), fallback=open_price)
+        if r:
+            snap_str = r.get(f"snapshot:{symbol}")
+            snap_obj = json.loads(snap_str) if snap_str else {}
+        else:
+            snap_obj = dict(self._snapshot_mem.get(symbol, {}))
+        previous_ref = _to_float(snap_obj.get("refPrice"), fallback=open_price)
         if previous_ref <= 0:
             previous_ref = open_price
 
         change = close_price - previous_ref
         change_percent = (change / previous_ref * 100.0) if previous_ref > 0 else 0.0
 
-        latest_snapshot_cache[symbol] = {
+        new_snap = {
             "symbol": symbol,
             "companyName": symbol,
             "price": close_price,
@@ -344,34 +356,41 @@ class VnstockFetcherService:
             "lastUpdate": target_ticks[-1].get("time") or datetime.now(tz=VN_TZ).isoformat(),
             "syncedAt": datetime.now(tz=VN_TZ).isoformat(),
         }
+        if r:
+            r.set(f"snapshot:{symbol}", json.dumps(new_snap))
+        else:
+            self._snapshot_mem[symbol] = new_snap
 
     def _merge_ticks_no_lock(self, symbol: str, ticks: List[Dict[str, Any]]) -> int:
         if not ticks:
             return 0
 
-        cache = intraday_cache[symbol]
         known = self._known_tick_ids[symbol]
-        added = 0
-
+        new_ticks = []
         for tick in ticks:
             key = self._tick_key(tick)
             if key in known:
                 continue
             known.add(key)
-            cache.append(tick)
-            added += 1
+            new_ticks.append(tick)
 
-        if added > 0:
-            cache.sort(key=lambda item: item["time"])
+        if not new_ticks:
+            return 0
 
-            if len(cache) > self.max_ticks_per_symbol:
-                del cache[:-self.max_ticks_per_symbol]
+        r = get_redis()
+        if r:
+            serialized = [json.dumps(t) for t in new_ticks]
+            r.rpush(f"intraday:{symbol}", *serialized)
+            r.ltrim(f"intraday:{symbol}", -self.max_ticks_per_symbol, -1)
+        else:
+            mem = self._intraday_mem[symbol]
+            mem.extend(new_ticks)
+            if len(mem) > self.max_ticks_per_symbol:
+                self._intraday_mem[symbol] = mem[-self.max_ticks_per_symbol:]
 
-            self._known_tick_ids[symbol] = {self._tick_key(item) for item in cache}
-            self._rebuild_snapshot_from_ticks(symbol)
-            self.last_intraday_sync_at = datetime.now(tz=VN_TZ).isoformat()
-
-        return added
+        self._rebuild_snapshot_from_ticks(symbol)
+        self.last_intraday_sync_at = datetime.now(tz=VN_TZ).isoformat()
+        return len(new_ticks)
 
     async def refresh_symbol_intraday(self, symbol: str, ignore_session: bool = False) -> bool:
         normalized = normalize_symbol(symbol)
@@ -492,7 +511,7 @@ class VnstockFetcherService:
                     "low": row["low"],
                     "close": row["close"],
                     "volume": row["volume"],
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                 }
                 for row in rows
             ]
@@ -653,6 +672,7 @@ class VnstockFetcherService:
     async def ingest_realtime_quotes(self, quotes: List[Dict[str, Any]]) -> int:
         saved = 0
         async with self._cache_lock:
+            r = get_redis()
             for quote in quotes:
                 symbol = normalize_symbol(str(quote.get("symbol", "")))
                 if not is_vn30_symbol(symbol):
@@ -673,7 +693,11 @@ class VnstockFetcherService:
 
                 self._merge_ticks_no_lock(symbol, [tick])
 
-                snapshot = latest_snapshot_cache.get(symbol, _empty_snapshot(symbol))
+                if r:
+                    snap_str = r.get(f"snapshot:{symbol}")
+                    snapshot = json.loads(snap_str) if snap_str else _empty_snapshot(symbol)
+                else:
+                    snapshot = dict(self._snapshot_mem.get(symbol, _empty_snapshot(symbol)))
                 snapshot["price"] = price
                 snapshot["change"] = _to_float(quote.get("change"), fallback=snapshot.get("change", 0.0))
                 snapshot["changePercent"] = _to_float(
@@ -688,7 +712,10 @@ class VnstockFetcherService:
                 snapshot["syncedAt"] = datetime.now(tz=VN_TZ).isoformat()
                 if _to_float(snapshot.get("refPrice")) <= 0:
                     snapshot["refPrice"] = snapshot["open"]
-                latest_snapshot_cache[symbol] = snapshot
+                if r:
+                    r.set(f"snapshot:{symbol}", json.dumps(snapshot))
+                else:
+                    self._snapshot_mem[symbol] = snapshot
 
                 saved += 1
 
@@ -701,7 +728,12 @@ class VnstockFetcherService:
         if not is_vn30_symbol(normalized):
             return _empty_snapshot(normalized or "UNKNOWN")
 
-        snapshot = dict(latest_snapshot_cache.get(normalized, _empty_snapshot(normalized)))
+        r = get_redis()
+        if r:
+            snap_str = r.get(f"snapshot:{normalized}")
+            snapshot = json.loads(snap_str) if snap_str else _empty_snapshot(normalized)
+        else:
+            snapshot = dict(self._snapshot_mem.get(normalized, _empty_snapshot(normalized)))
         if _to_float(snapshot.get("price")) <= 0:
             history = self.load_history_from_db(normalized, limit=2)
             if history:
@@ -745,7 +777,11 @@ class VnstockFetcherService:
             if not is_vn30_symbol(normalized):
                 continue
 
-            source = intraday_cache.get(normalized, [])
+            if redis_client:
+                raw = redis_client.lrange(f"intraday:{normalized}", 0, -1)
+                source = [json.loads(x) for x in raw]
+            else:
+                source = []
             clipped = source[-max(limit, 1):]
             output[normalized] = list(reversed([dict(item) for item in clipped]))
 
@@ -758,8 +794,15 @@ class VnstockFetcherService:
 
         try:
             for symbol in VN30_SYMBOLS:
+                if redis_client:
+                    raw = redis_client.lrange(f"intraday:{symbol}", 0, -1)
+                    symbol_ticks = [json.loads(x) for x in raw]
+                    # Dump data lake parquet backup
+                    dump_ticks_to_parquet(symbol, symbol_ticks)
+                else:
+                    symbol_ticks = []
                 ticks = [
-                    tick for tick in intraday_cache.get(symbol, [])
+                    tick for tick in symbol_ticks
                     if _to_date(tick.get("time")) == today
                 ]
                 if not ticks:
@@ -785,13 +828,18 @@ class VnstockFetcherService:
                         "low": low_price,
                         "close": close_price,
                         "volume": volume,
-                        "created_at": datetime.utcnow(),
+                        "created_at": datetime.now(timezone.utc),
                     }
                 )
 
             if not payload_rows:
                 db.commit()
                 return 0
+            
+            # Clear intraday cache for new day
+            if redis_client:
+                for symbol in VN30_SYMBOLS:
+                    redis_client.delete(f"intraday:{symbol}")
 
             stmt = mysql_insert(DailyOHLCV).values(payload_rows)
             stmt = stmt.on_duplicate_key_update(
