@@ -20,7 +20,7 @@ from vnstock import Vnstock
 
 from etl.config import EtlConfig
 from etl.logging_setup import get_logger
-from etl.retry import with_retry
+from etl.retry import _acquire_rate_slot, with_retry
 
 log = get_logger(__name__)
 
@@ -33,11 +33,15 @@ def _dump_dataframe_json(df: pd.DataFrame, out: Path) -> None:
 
 
 # --- overview --------------------------------------------------------------
-@with_retry()
 def _fetch_overview(symbol: str) -> pd.DataFrame:
-    stock = Vnstock().stock(symbol=symbol, source="VCI")
-    overview = stock.company.overview()
-    return overview if isinstance(overview, pd.DataFrame) else pd.DataFrame()
+    try:
+        _acquire_rate_slot()
+        stock = Vnstock().stock(symbol=symbol, source="KBS")
+        overview = stock.company.overview()
+        return overview if isinstance(overview, pd.DataFrame) else pd.DataFrame()
+    except Exception as exc:
+        log.warning("overview fetch failed for %s (%s) — skipping", symbol, exc)
+        return pd.DataFrame()
 
 
 def extract_overview(symbol: str, cfg: EtlConfig) -> Optional[Path]:
@@ -52,11 +56,34 @@ def extract_overview(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 
 
 # --- ratio summary ---------------------------------------------------------
-@with_retry()
 def _fetch_ratio_summary(symbol: str) -> pd.DataFrame:
-    stock = Vnstock().stock(symbol=symbol, source="VCI")
-    rs = stock.company.ratio_summary()
-    return rs if isinstance(rs, pd.DataFrame) else pd.DataFrame()
+    """Lấy chỉ số tài chính. Thử Finance.ratio() (VCI/MSN), fallback về company.ratio_summary()."""
+    # Phương án 1: Finance.ratio() — VCI, MSN (vnstock 3.5.1)
+    for source in ("VCI", "MSN"):
+        try:
+            _acquire_rate_slot()
+            stock = Vnstock().stock(symbol=symbol, source=source)
+            try:
+                rs = stock.finance.ratio(period="quarter", lang="vi")
+            except TypeError:
+                rs = stock.finance.ratio(period="quarter")
+            if isinstance(rs, pd.DataFrame) and not rs.empty:
+                return rs
+        except Exception as exc:
+            log.info("Finance.ratio() source=%s failed for %s (%s)", source, symbol, exc)
+            continue
+
+    # Phương án 2: Fallback về company.ratio_summary() (API cũ, có thể không còn)
+    try:
+        _acquire_rate_slot()
+        stock = Vnstock().stock(symbol=symbol, source="KBS")
+        if hasattr(stock.company, "ratio_summary"):
+            rs = stock.company.ratio_summary()
+            return rs if isinstance(rs, pd.DataFrame) else pd.DataFrame()
+    except Exception as exc:
+        log.warning("ratio_summary fetch failed for %s (%s) — skipping", symbol, exc)
+
+    return pd.DataFrame()
 
 
 def extract_ratio_summary(symbol: str, cfg: EtlConfig) -> Optional[Path]:
@@ -73,7 +100,7 @@ def extract_ratio_summary(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 # --- news ------------------------------------------------------------------
 @with_retry()
 def _fetch_news(symbol: str) -> pd.DataFrame:
-    stock = Vnstock().stock(symbol=symbol, source="VCI")
+    stock = Vnstock().stock(symbol=symbol, source="KBS")
     news = stock.company.news()
     return news if isinstance(news, pd.DataFrame) else pd.DataFrame()
 
@@ -89,7 +116,7 @@ def extract_news(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 # --- events ----------------------------------------------------------------
 @with_retry()
 def _fetch_events(symbol: str) -> pd.DataFrame:
-    stock = Vnstock().stock(symbol=symbol, source="VCI")
+    stock = Vnstock().stock(symbol=symbol, source="KBS")
     events = stock.company.events()
     return events if isinstance(events, pd.DataFrame) else pd.DataFrame()
 
@@ -103,10 +130,17 @@ def extract_events(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 
 
 # --- listing metadata ------------------------------------------------------
-@with_retry()
 def _fetch_listing() -> pd.DataFrame:
-    listing = Vnstock().stock(symbol="FPT", source="VCI").listing.all_symbols()
-    return listing if isinstance(listing, pd.DataFrame) else pd.DataFrame()
+    # Try TCBS first; VCI listing endpoint is often unstable.
+    for source in ("KBS",):
+        try:
+            _acquire_rate_slot()
+            listing = Vnstock().stock(symbol="FPT", source=source).listing.all_symbols()
+            if isinstance(listing, pd.DataFrame) and not listing.empty:
+                return listing
+        except Exception as exc:
+            log.warning("listing fetch failed with source=%s (%s)", source, exc)
+    return pd.DataFrame()
 
 
 def extract_listing(cfg: EtlConfig) -> Optional[Path]:

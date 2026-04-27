@@ -9,9 +9,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-from vnstock import Company, Finance
 
 from src.database.db import AsyncSessionLocal
 from src.database.models import CompanyOverviewCache, EventsCache, FinancialReportCache, NewsCache
@@ -398,98 +396,23 @@ class FundamentalFetcherService:
 
     @retry(retry=retry_if_exception_type(Exception), wait=wait_exponential(multiplier=0.8, min=1, max=5), stop=stop_after_attempt(3), reraise=True)
     def _fetch_company_overview_sync(self, symbol: str) -> dict[str, Any]:
-        company = Company(source=self.company_source, symbol=symbol)
-        records = self._frame_to_records(company.overview())
-        return records[0] if records else {}
+        logger.warning("vnstock company overview fetch disabled")
+        return {}
 
     @retry(retry=retry_if_exception_type(Exception), wait=wait_exponential(multiplier=0.8, min=1, max=5), stop=stop_after_attempt(3), reraise=True)
     def _fetch_financial_report_sync(self, symbol: str, report_type: str) -> list[dict[str, Any]]:
-        method_name = self.financial_methods.get(report_type)
-        if not method_name:
-            return []
-
-        finance = Finance(source=self.company_source, symbol=symbol)
-        fetch_method = getattr(finance, method_name)
-        records = self._frame_to_records(fetch_method())
-        return records[: self.max_financial_rows]
+        logger.warning("vnstock financial report fetch disabled")
+        return []
 
     @retry(retry=retry_if_exception_type(Exception), wait=wait_exponential(multiplier=0.8, min=1, max=5), stop=stop_after_attempt(3), reraise=True)
     def _fetch_symbol_news_sync(self, symbol: str) -> list[dict[str, Any]]:
-        company = Company(source=self.company_source, symbol=symbol)
-        frame = company.news()
-        if frame is None or frame.empty:
-            return []
-
-        news_rows: list[dict[str, Any]] = []
-        for row in frame.to_dict("records"):
-            record = NewsRowModel.model_validate(row)
-            title = str(record.news_title or record.friendly_sub_title or "").strip()
-            if not title:
-                continue
-
-            short_content = str(record.news_short_content or record.news_sub_title or title).strip()
-            item_id = str(record.news_id or record.id or "").strip() or f"{symbol}-{len(news_rows) + 1}"
-            published_iso = self._to_iso_datetime(record.public_date or record.created_at or record.updated_at, fallback=self._utc_now().isoformat())
-
-            news_rows.append(
-                {
-                    "id": f"{symbol}-{item_id}",
-                    "symbol": symbol,
-                    "symbols": [symbol],
-                    "source": "vnstock",
-                    "title": title,
-                    "summary": short_content,
-                    "publish_time": published_iso,
-                    "time": published_iso,
-                    "url": str(record.news_source_link or "").strip(),
-                    "impact": self._impact_from_price_change_pct(record.price_change_pct),
-                }
-            )
-
-        news_rows.sort(key=lambda item: item.get("publish_time") or "", reverse=True)
-        return news_rows[: self.max_news_per_symbol]
+        logger.warning("vnstock company news fetch disabled")
+        return []
 
     @retry(retry=retry_if_exception_type(Exception), wait=wait_exponential(multiplier=0.8, min=1, max=5), stop=stop_after_attempt(3), reraise=True)
     def _fetch_symbol_events_sync(self, symbol: str) -> list[dict[str, Any]]:
-        company = Company(source=self.company_source, symbol=symbol)
-        frame = company.events()
-        if frame is None or frame.empty:
-            return []
-
-        events_rows: list[dict[str, Any]] = []
-        for row in frame.to_dict("records"):
-            record = EventRowModel.model_validate(row)
-            title = str(record.event_title or record.event_list_name or "").strip()
-            if not title:
-                continue
-
-            raw_date = record.public_date or record.issue_date or record.record_date or record.exright_date
-            date_value = self._to_iso_date(raw_date)
-            if not date_value or date_value == "1753-01-01":
-                continue
-
-            details: list[str] = []
-            if record.event_list_name:
-                details.append(str(record.event_list_name).strip())
-            if (record.ratio or 0) > 0:
-                details.append(f"ratio {record.ratio:g}")
-            if (record.value or 0) > 0:
-                details.append(f"value {record.value:g}")
-            description = " | ".join(details) if details else "Corporate event update"
-
-            item_id = str(record.id or "").strip() or f"{symbol}-event-{len(events_rows) + 1}"
-            events_rows.append(
-                {
-                    "id": f"{symbol}-{item_id}",
-                    "symbol": symbol,
-                    "date": date_value,
-                    "title": title,
-                    "description": description,
-                }
-            )
-
-        events_rows.sort(key=lambda item: item.get("date") or "", reverse=True)
-        return events_rows[: self.max_events_per_symbol]
+        logger.warning("vnstock company events fetch disabled")
+        return []
 
     async def refresh_company_overview(self, symbol: str) -> tuple[dict[str, Any], Optional[str]]:
         await fetcher_service.wait_for_rate_slot()

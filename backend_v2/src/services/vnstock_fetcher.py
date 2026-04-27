@@ -10,7 +10,6 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-from vnstock import Quote, change_api_key
 
 from src.database.data_lake import dump_ticks_to_parquet
 from src.database.db import AsyncSessionLocal, SessionLocal
@@ -176,8 +175,8 @@ class VnstockFetcherService:
             return
 
         try:
-            changed = change_api_key(api_key)
-            logger.info("VNStock API key configured (%s)", "updated" if changed else "already active")
+            # changed = change_api_key(api_key)
+            logger.info("VNStock API key configuration skipped (hard removal)")
         except BaseException as exc:  # vnstock may raise SystemExit on quota/auth failures.
             logger.warning("Failed to configure VNStock API key: %s", exc)
 
@@ -255,8 +254,8 @@ class VnstockFetcherService:
         reraise=True,
     )
     def _fetch_intraday_sync(self, symbol: str) -> Optional[pd.DataFrame]:
-        quote = Quote(source=self.quote_source, symbol=symbol)
-        return quote.intraday(page_size=self.intraday_page_size)
+        logger.warning("vnstock intraday fetch disabled")
+        return pd.DataFrame()
 
     @retry(
         retry=retry_if_exception_type(Exception),
@@ -265,8 +264,8 @@ class VnstockFetcherService:
         reraise=True,
     )
     def _fetch_history_sync(self, symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
-        quote = Quote(source=self.quote_source, symbol=symbol)
-        return quote.history(start=start, end=end, interval="1D")
+        logger.warning("vnstock history fetch disabled")
+        return pd.DataFrame()
 
     @staticmethod
     def _tick_key(tick: Dict[str, Any]) -> str:

@@ -23,13 +23,13 @@ log = get_logger(__name__)
 
 
 @with_retry()
-def _fetch_history(symbol: str, start: date, end: date) -> pd.DataFrame:
+def _fetch_history(symbol: str, start: date, end: date, source: str = "KBS") -> pd.DataFrame:
     """Gọi vnstock để lấy OHLCV. Có retry tự động với backoff.
 
     Tạo ``Vnstock()`` bên trong hàm để mỗi worker thread có client riêng
     (vnstock <3.x không hoàn toàn thread-safe).
     """
-    stock = Vnstock().stock(symbol=symbol, source="VCI")
+    stock = Vnstock().stock(symbol=symbol, source=source)
     return stock.quote.history(
         start=str(start),
         end=str(end),
@@ -37,9 +37,46 @@ def _fetch_history(symbol: str, start: date, end: date) -> pd.DataFrame:
     )
 
 
+_REQUIRED_PRICE_COLUMNS = {"time", "open", "high", "low", "close", "volume"}
+
+
+def _fetch_history_with_fallback(
+    symbol: str, start: date, end: date, sources: list[str]
+) -> pd.DataFrame:
+    """Thử fetch lần lượt từ các source trong danh sách. Trả về kết quả đầu tiên hợp lệ."""
+    last_exc: Exception | None = None
+
+    for source in sources:
+        try:
+            df = _fetch_history(symbol, start, end, source=source)
+            if df is None or df.empty:
+                log.info("No data from source=%s for %s, trying next...", source, symbol)
+                continue
+
+            # Validate schema
+            missing = _REQUIRED_PRICE_COLUMNS - set(df.columns)
+            if missing:
+                log.warning(
+                    "Source=%s returned invalid schema for %s (missing: %s), trying next...",
+                    source, symbol, missing,
+                )
+                continue
+
+            log.info("Fetched prices %s from source=%s (%d rows)", symbol, source, len(df))
+            return df
+        except Exception as exc:
+            log.info("Source=%s failed for %s: %s — trying next...", source, symbol, exc)
+            last_exc = exc
+            continue
+
+    if last_exc:
+        log.warning("All sources failed for %s, last error: %s", symbol, last_exc)
+    return pd.DataFrame()
+
+
 def extract_symbol_prices(symbol: str, cfg: EtlConfig) -> Optional[Path]:
     """Fetch giá 1 mã cổ phiếu, ghi raw CSV. Trả về đường dẫn file đã ghi."""
-    df = _fetch_history(symbol, cfg.fetch_start, cfg.user_end)
+    df = _fetch_history_with_fallback(symbol, cfg.fetch_start, cfg.user_end, cfg.extract_sources)
     if df is None or df.empty:
         log.warning("No price data returned for %s", symbol)
         return None
@@ -52,7 +89,7 @@ def extract_symbol_prices(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 
 def extract_index_prices(index_symbol: str, cfg: EtlConfig) -> Optional[Path]:
     """Fetch giá chỉ số (VNINDEX/VN30/...)."""
-    df = _fetch_history(index_symbol, cfg.fetch_start, cfg.user_end)
+    df = _fetch_history_with_fallback(index_symbol, cfg.fetch_start, cfg.user_end, cfg.extract_sources)
     if df is None or df.empty:
         log.warning("No macro index data returned for %s", index_symbol)
         return None

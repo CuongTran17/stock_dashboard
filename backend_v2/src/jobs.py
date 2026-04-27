@@ -27,8 +27,11 @@ def build_lifespan(
         logger.info("Initializing MySQL schema...")
         init_db()
 
+        from src.services.mock_intraday_streamer import run_mock_streamer
+
         intraday_task = asyncio.create_task(fetcher_service.fetch_loop(), name="vn30-intraday-fetch")
         history_task = asyncio.create_task(fetcher_service.preload_historical_data(vn30_symbols), name="vn30-history-preload")
+        mock_stream_task = asyncio.create_task(run_mock_streamer(fetcher_service), name="vn30-mock-intraday-stream")
         reference_preload_task: Optional[asyncio.Task[Any]] = None
 
         if preload_reference_cache_enabled:
@@ -58,7 +61,7 @@ def build_lifespan(
         finally:
             fetcher_service.stop()
 
-            running_tasks: list[asyncio.Task[Any]] = [intraday_task, history_task]
+            running_tasks: list[asyncio.Task[Any]] = [intraday_task, history_task, mock_stream_task]
             if reference_preload_task is not None:
                 running_tasks.append(reference_preload_task)
 

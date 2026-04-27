@@ -22,6 +22,18 @@ MACRO_SYMBOLS: list[str] = ["VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX"]
 
 NO_NEWS_FALLBACK = "NO_NEWS_IN_RANGE_FROM_VNSTOCK"
 NO_EVENT_FALLBACK = "NO_EVENT_IN_RANGE_FROM_VNSTOCK"
+NO_GOOGLE_NEWS_FALLBACK = "NO_GOOGLE_NEWS_IN_RANGE"
+
+# Nguồn dữ liệu ưu tiên cho extract (fallback theo thứ tự)
+DEFAULT_EXTRACT_SOURCES: list[str] = ["KBS", "VCI"]
+
+# Các loại báo cáo tài chính (BCTC)
+FUNDAMENTAL_REPORT_TYPES: dict[str, str] = {
+    "income": "income_statement",
+    "balance": "balance_sheet",
+    "cashflow": "cash_flow",
+    "ratios": "ratio",
+}
 
 MICRO_COLUMNS: list[str] = [
     "pe",
@@ -75,6 +87,14 @@ class EtlConfig:
     log_dir: Path = Path("logs")
     output_file: Path = Path("market_data.csv")
 
+    # Multi-source fallback cho extract giá.
+    extract_sources: list[str] = field(default_factory=lambda: list(DEFAULT_EXTRACT_SOURCES))
+
+    # Feature flags cho extract layer.
+    enable_fundamental: bool = True
+    enable_google_news: bool = True
+    google_news_period: str = "7d"
+
     # Identifier đóng băng cho mỗi lần chạy.
     run_id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%dT%H%M%S"))
 
@@ -126,6 +146,10 @@ class EtlConfig:
         warmup_days: int = 45,
         lake_dir: str | Path = "lake",
         log_dir: str | Path = "logs",
+        extract_sources: list[str] | None = None,
+        enable_fundamental: bool = True,
+        enable_google_news: bool = True,
+        google_news_period: str = "7d",
     ) -> "EtlConfig":
         return cls(
             user_start=cls.parse_date(start_date),
@@ -137,4 +161,8 @@ class EtlConfig:
             warmup_days=warmup_days,
             lake_dir=Path(lake_dir),
             log_dir=Path(log_dir),
+            extract_sources=list(extract_sources or DEFAULT_EXTRACT_SOURCES),
+            enable_fundamental=enable_fundamental,
+            enable_google_news=enable_google_news,
+            google_news_period=google_news_period,
         )

@@ -29,14 +29,23 @@ coverage
 
 *.tsbuildinfo
 
-# Old backends and guides (not needed in repo)
+# Development scratch and archived files (not needed in repo)
+dev-archive/
 legacy/
 vnstock-agent-guide/
 .vercel
 
+# Root-level scratch files (old development scripts)
+extract_data.py
+fetch_interbank_rate.py
+generate_market_data.py
+scratch_vci.py
+transform_data.py
+run_daily_pipeline.bat
+
 # Generated data files (run ETL pipeline to regenerate)
 market_data.csv
-market_data_raw_text*.csv
+market_data.parquet
 lake/
 
 # Academic/personal documents (not part of the project)

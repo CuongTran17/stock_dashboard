@@ -21,13 +21,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shutil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 from typing import Callable
 
-from etl.config import DEFAULT_SYMBOLS, MACRO_SYMBOLS, EtlConfig
+from dotenv import load_dotenv
+from vnstock import change_api_key
+
+from etl.config import DEFAULT_SYMBOLS, FUNDAMENTAL_REPORT_TYPES, MACRO_SYMBOLS, EtlConfig
 from etl.extract.extract_company import (
     extract_events,
     extract_listing,
@@ -35,6 +39,8 @@ from etl.extract.extract_company import (
     extract_overview,
     extract_ratio_summary,
 )
+from etl.extract.extract_fundamental import extract_fundamental
+from etl.extract.extract_googlenews import extract_google_news
 from etl.extract.extract_interbank import extract_interbank_rate
 from etl.extract.extract_prices import extract_index_prices, extract_symbol_prices
 from etl.logging_setup import get_logger, setup_logging
@@ -76,6 +82,16 @@ def _extract_all(cfg: EtlConfig) -> dict[str, Exception]:
             jobs.append(_submit(pool, f"news:{symbol}", extract_news, symbol, cfg))
             jobs.append(_submit(pool, f"events:{symbol}", extract_events, symbol, cfg))
 
+            # BCTC / Fundamental — chạy song song nếu enable
+            if cfg.enable_fundamental:
+                for report_type in FUNDAMENTAL_REPORT_TYPES:
+                    jobs.append(_submit(
+                        pool,
+                        f"fundamental/{report_type}:{symbol}",
+                        extract_fundamental,
+                        symbol, report_type, cfg,
+                    ))
+
         label_by_future = {fut: label for label, fut in jobs}
         for fut in as_completed(label_by_future):
             label = label_by_future[fut]
@@ -84,6 +100,16 @@ def _extract_all(cfg: EtlConfig) -> dict[str, Exception]:
             except Exception as exc:  # đã retry 5 lần ở tenacity
                 log.exception("Extract job failed: %s", label)
                 errors[label] = exc
+
+    # GoogleNews — chạy tuần tự (có sleep giữa các symbol để tránh Google block)
+    if cfg.enable_google_news:
+        log.info("GoogleNews extract starting (%d symbols, sequential)", len(cfg.symbols))
+        for symbol in cfg.symbols:
+            try:
+                extract_google_news(symbol, cfg)
+            except Exception as exc:
+                log.warning("GoogleNews extract failed for %s: %s", symbol, exc)
+                errors[f"google_news:{symbol}"] = exc
 
     return errors
 
@@ -116,6 +142,18 @@ def run(cfg: EtlConfig) -> Path:
     setup_logging(cfg.log_dir)
     cfg.raw_dir.mkdir(parents=True, exist_ok=True)
     cfg.processed_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load vnstock API key
+    env_path = Path("backend_v2/.env")
+    if env_path.exists():
+        load_dotenv(env_path)
+    api_key = os.getenv("VNSTOCK_API_KEY")
+    if api_key:
+        try:
+            changed = change_api_key(api_key)
+            log.info("VNStock API key loaded (%s).", "updated" if changed else "active")
+        except Exception as e:
+            log.warning("Could not set VNStock API key: %s", e)
 
     log.info(
         "=== ETL RUN %s ===  symbols=%d  user_range=%s..%s  fetch_start=%s  text_mode=%s",
@@ -194,6 +232,30 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--warmup-days", type=int, default=45)
     parser.add_argument("--lake-dir", default="lake")
     parser.add_argument("--log-dir", default="logs")
+    parser.add_argument(
+        "--extract-sources", default="KBS,VCI",
+        help="Comma-separated list of vnstock sources (fallback order)",
+    )
+    parser.add_argument(
+        "--enable-fundamental", action="store_true", default=True,
+        help="Enable BCTC extraction (income, balance, cashflow, ratios)",
+    )
+    parser.add_argument(
+        "--disable-fundamental", action="store_true", default=False,
+        help="Disable BCTC extraction",
+    )
+    parser.add_argument(
+        "--enable-google-news", action="store_true", default=True,
+        help="Enable GoogleNews extraction",
+    )
+    parser.add_argument(
+        "--disable-google-news", action="store_true", default=False,
+        help="Disable GoogleNews extraction",
+    )
+    parser.add_argument(
+        "--google-news-period", default="7d",
+        help="GoogleNews time period (e.g. 7d, 30d)",
+    )
     return parser
 
 
@@ -202,6 +264,9 @@ def main() -> None:
     symbols = _parse_symbols(args.symbols)
     if not symbols:
         raise ValueError("No valid symbols. Use --symbols MBB,FPT,HPG")
+
+    # Parse extract sources
+    sources = [s.strip().upper() for s in args.extract_sources.split(",") if s.strip()]
 
     cfg = EtlConfig.from_args(
         start_date=args.start_date,
@@ -213,6 +278,10 @@ def main() -> None:
         warmup_days=args.warmup_days,
         lake_dir=args.lake_dir,
         log_dir=args.log_dir,
+        extract_sources=sources,
+        enable_fundamental=args.enable_fundamental and not args.disable_fundamental,
+        enable_google_news=args.enable_google_news and not args.disable_google_news,
+        google_news_period=args.google_news_period,
     )
     run(cfg)
 
