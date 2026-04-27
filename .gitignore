@@ -43,6 +43,10 @@ scratch_vci.py
 transform_data.py
 run_daily_pipeline.bat
 
+# Test files (kept locally, not part of repo)
+test_*.py
+*_test.py
+
 # Generated data files (run ETL pipeline to regenerate)
 market_data.csv
 market_data.parquet
