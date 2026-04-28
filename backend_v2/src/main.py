@@ -28,6 +28,7 @@ from src.api.portfolio import router as portfolio_router
 from src.database.db import init_db
 from src.jobs import build_lifespan
 from src.routes.analysis import router as analysis_router
+from src.routes.etl_status import router as etl_status_router
 from src.routes.internal import router as internal_router
 from src.routes.market import router as market_router
 from src.routes.stocks import router as stocks_router
@@ -88,6 +89,7 @@ app.include_router(admin_router)
 app.include_router(portfolio_router)
 app.include_router(stocks_router)
 app.include_router(analysis_router)
+app.include_router(etl_status_router)
 app.include_router(market_router)
 app.include_router(internal_router)
 app.include_router(websocket_router)

@@ -32,9 +32,14 @@ export default defineConfig({
     },
   },
   build: {
+    chunkSizeWarningLimit: 650,
     rollupOptions: {
       output: {
-        manualChunks: undefined,
+        manualChunks: {
+          vue: ['vue', 'vue-router'],
+          apexcharts: ['apexcharts', 'vue3-apexcharts'],
+          lightweightCharts: ['lightweight-charts'],
+        },
       },
     },
   },

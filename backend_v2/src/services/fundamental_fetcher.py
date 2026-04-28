@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.database.db import AsyncSessionLocal

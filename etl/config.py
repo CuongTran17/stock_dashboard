@@ -27,6 +27,13 @@ NO_GOOGLE_NEWS_FALLBACK = "NO_GOOGLE_NEWS_IN_RANGE"
 # Nguồn dữ liệu ưu tiên cho extract (fallback theo thứ tự)
 DEFAULT_EXTRACT_SOURCES: list[str] = ["KBS", "VCI"]
 
+# Schedule defaults.
+SCHEDULE_TIMEZONE = "Asia/Ho_Chi_Minh"
+DAILY_ETL_CRON = {"day_of_week": "mon-fri", "hour": 15, "minute": 20}
+CACHE_REFRESH_CRON = {"day_of_week": "mon-fri", "hour": 15, "minute": 30}
+FUNDAMENTAL_REFRESH_CRON = {"day_of_week": "sun", "hour": 0, "minute": 0}
+HEALTH_CHECK_INTERVAL_MINUTES = 5
+
 # Các loại báo cáo tài chính (BCTC)
 FUNDAMENTAL_REPORT_TYPES: dict[str, str] = {
     "income": "income_statement",
@@ -47,6 +54,35 @@ MICRO_COLUMNS: list[str] = [
     "quick_ratio",
     "gross_margin",
     "net_profit_margin",
+]
+
+TECHNICAL_INDICATOR_COLUMNS: list[str] = [
+    "sma_7",
+    "ema_21",
+    "rsi_14",
+    "macd",
+    "bb_upper",
+    "bb_lower",
+    "macd_signal",
+    "macd_histogram",
+    "vol_sma_20",
+    "atr_14",
+]
+
+QUALITY_COLUMNS: list[str] = [
+    "is_outlier",
+]
+
+FUNDAMENTAL_METRIC_COLUMNS: list[str] = [
+    "fund_revenue",
+    "fund_net_profit",
+    "fund_total_assets",
+    "fund_total_equity",
+    "fund_revenue_growth",
+]
+
+GOOGLE_NEWS_COLUMNS: list[str] = [
+    "google_news_headlines",
 ]
 
 # Danh sách macro numeric columns sẽ được ffill (KHÔNG bfill) ở bước transform.
@@ -94,6 +130,9 @@ class EtlConfig:
     enable_fundamental: bool = True
     enable_google_news: bool = True
     google_news_period: str = "7d"
+    enable_mysql_load: bool = True
+    enable_tick_eod: bool = True
+    tick_source: str = "lake"  # "lake" | "redis" | "auto"
 
     # Identifier đóng băng cho mỗi lần chạy.
     run_id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%dT%H%M%S"))
@@ -150,6 +189,9 @@ class EtlConfig:
         enable_fundamental: bool = True,
         enable_google_news: bool = True,
         google_news_period: str = "7d",
+        enable_mysql_load: bool = True,
+        enable_tick_eod: bool = True,
+        tick_source: str = "lake",
     ) -> "EtlConfig":
         return cls(
             user_start=cls.parse_date(start_date),
@@ -165,4 +207,7 @@ class EtlConfig:
             enable_fundamental=enable_fundamental,
             enable_google_news=enable_google_news,
             google_news_period=google_news_period,
+            enable_mysql_load=enable_mysql_load,
+            enable_tick_eod=enable_tick_eod,
+            tick_source=tick_source,
         )

@@ -62,8 +62,9 @@ import TabUsers from './components/TabUsers.vue'
 import TabPortfolios from './components/TabPortfolios.vue'
 import TabPromotions from './components/TabPromotions.vue'
 import TabFlashSales from './components/TabFlashSales.vue'
+import TabEtlMonitor from './components/TabEtlMonitor.vue'
 
-type AdminTab = 'revenue' | 'users' | 'portfolios' | 'promotions' | 'flash-sales'
+type AdminTab = 'revenue' | 'users' | 'portfolios' | 'promotions' | 'flash-sales' | 'etl-monitor'
 
 const tabs: Array<{
   key: AdminTab
@@ -107,6 +108,13 @@ const tabs: Array<{
     description: 'Tạo ưu đãi hệ thống tự động áp dụng cho checkout.',
     badgeClass: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300',
   },
+  {
+    key: 'etl-monitor',
+    label: 'ETL Monitor',
+    shortLabel: 'E',
+    description: 'Theo dõi pipeline dữ liệu, snapshot, health và lịch sử chạy.',
+    badgeClass: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
+  },
 ]
 
 const route = useRoute()
@@ -118,13 +126,14 @@ const activeComponent = computed(() => {
   if (activeTab.value === 'portfolios') return TabPortfolios
   if (activeTab.value === 'promotions') return TabPromotions
   if (activeTab.value === 'flash-sales') return TabFlashSales
+  if (activeTab.value === 'etl-monitor') return TabEtlMonitor
   return TabRevenue
 })
 
 const activeTabMeta = computed(() => tabs.find((tab) => tab.key === activeTab.value) || tabs[0])
 
 function resolveTab(value: unknown): AdminTab {
-  return value === 'users' || value === 'portfolios' || value === 'promotions' || value === 'flash-sales' ? value : 'revenue'
+  return value === 'users' || value === 'portfolios' || value === 'promotions' || value === 'flash-sales' || value === 'etl-monitor' ? value : 'revenue'
 }
 
 function setActiveTab(tab: AdminTab): void {

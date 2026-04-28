@@ -17,11 +17,16 @@ from typing import Iterable
 import pandas as pd
 
 from etl.config import (
+    FUNDAMENTAL_METRIC_COLUMNS,
+    GOOGLE_NEWS_COLUMNS,
     MACRO_NUMERIC_COLUMNS,
     MACRO_SYMBOLS,
     MICRO_COLUMNS,
     NO_EVENT_FALLBACK,
+    NO_GOOGLE_NEWS_FALLBACK,
     NO_NEWS_FALLBACK,
+    QUALITY_COLUMNS,
+    TECHNICAL_INDICATOR_COLUMNS,
     EtlConfig,
 )
 from etl.extract.extract_company import (
@@ -32,9 +37,13 @@ from etl.extract.extract_company import (
     load_ratio_summary,
 )
 from etl.extract.extract_prices import load_raw_index, load_raw_prices
+from etl.extract.extract_googlenews import load_google_news
 from etl.logging_setup import get_logger
+from etl.transform.transform_fundamental import merge_fundamental
+from etl.transform.transform_googlenews import merge_google_news
 from etl.transform.transform_indicators import add_price_indicators
 from etl.transform.transform_news import merge_events, merge_news
+from etl.transform.transform_validate import enforce_schema, report_quality_metrics, validate_and_clean
 
 log = get_logger(__name__)
 
@@ -49,14 +58,14 @@ FINAL_COLUMNS: list[str] = [
     "low_price",
     "close_price",
     "volume",
-    "sma_7",
-    "ema_21",
-    "rsi_14",
-    "macd",
+    *QUALITY_COLUMNS,
+    *TECHNICAL_INDICATOR_COLUMNS,
     *[f"micro_{c}" for c in MICRO_COLUMNS],
+    *FUNDAMENTAL_METRIC_COLUMNS,
     *MACRO_NUMERIC_COLUMNS,
     "news_headlines",
     "event_headlines",
+    *GOOGLE_NEWS_COLUMNS,
 ]
 
 
@@ -100,14 +109,14 @@ def build_macro_frame(cfg: EtlConfig) -> pd.DataFrame:
             f"macro_{prefix}_close",
             f"macro_{prefix}_volume",
         ]
-        df = df[keep]
+        df = df[keep].drop_duplicates("data_date", keep="last")
 
         base = df if base is None else base.merge(df, on="data_date", how="outer")
 
     if base is None:
         return pd.DataFrame(columns=["data_date"])
 
-    return base.sort_values("data_date").reset_index(drop=True)
+    return base.sort_values("data_date").drop_duplicates("data_date", keep="last").reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +130,7 @@ def build_company_meta(cfg: EtlConfig) -> pd.DataFrame:
     listing["symbol"] = listing["symbol"].astype(str).str.upper()
     if "company_name" not in listing.columns:
         listing["company_name"] = ""
-    return listing[["symbol", "company_name"]]
+    return listing[["symbol", "company_name"]].drop_duplicates("symbol", keep="last")
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +162,12 @@ def build_symbol_dataset(
     )
     prices = prices.sort_values("data_date").reset_index(drop=True)
 
+    # 1b. Data-quality gate before indicators.
+    prices = validate_and_clean(prices, symbol=symbol)
+    if prices.empty:
+        log.warning("No valid prices after quality clean for %s, skip", symbol)
+        return pd.DataFrame()
+
     # 2. Indicators — tính trên TOÀN BỘ cửa sổ fetch (đã warm-up).
     prices = add_price_indicators(prices, close_col="close_price")
 
@@ -177,11 +192,18 @@ def build_symbol_dataset(
             if col in row.index:
                 prices[f"micro_{col}"] = row.get(col, pd.NA)
 
+    # 4b. Fundamental quarterly reports -> daily aligned columns.
+    prices = merge_fundamental(prices, symbol, cfg)
+
     # 5. News & events — KHÔNG bfill
     news_raw = load_news(symbol, cfg)
     events_raw = load_events(symbol, cfg)
     prices = merge_news(prices, news_raw, text_mode=cfg.text_mode)
     prices = merge_events(prices, events_raw, text_mode=cfg.text_mode)
+
+    # 5b. Google News — same anti-lookahead behavior as local news.
+    google_news_raw = pd.DataFrame(load_google_news(symbol, cfg))
+    prices = merge_google_news(prices, google_news_raw, text_mode=cfg.text_mode)
 
     # 6. Company metadata
     prices = prices.merge(company_meta, on="symbol", how="left")
@@ -212,15 +234,31 @@ def build_symbol_dataset(
     if cfg.text_mode == "dense":
         prices["news_headlines"] = prices["news_headlines"].fillna(NO_NEWS_FALLBACK)
         prices["event_headlines"] = prices["event_headlines"].fillna(NO_EVENT_FALLBACK)
+        prices["google_news_headlines"] = prices["google_news_headlines"].fillna(NO_GOOGLE_NEWS_FALLBACK)
     else:
         prices["news_headlines"] = prices["news_headlines"].fillna("")
         prices["event_headlines"] = prices["event_headlines"].fillna("")
+        prices["google_news_headlines"] = prices["google_news_headlines"].fillna("")
 
     # 9. Cắt warm-up -> đúng [user_start, user_end]
     user_start_ts = pd.Timestamp(cfg.user_start)
     user_end_ts = pd.Timestamp(cfg.user_end)
     ts = pd.to_datetime(prices["data_date"])
     prices = prices[(ts >= user_start_ts) & (ts <= user_end_ts)].reset_index(drop=True)
+
+    prices = enforce_schema(
+        prices,
+        {
+            "data_date": "str",
+            "open_price": "float64",
+            "high_price": "float64",
+            "low_price": "float64",
+            "close_price": "float64",
+            "volume": "int64",
+            "is_outlier": "bool",
+        },
+    )
+    report_quality_metrics(prices, symbol)
 
     log.info(
         "Built dataset %s rows=%d range=%s..%s",

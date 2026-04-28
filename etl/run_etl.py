@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import shutil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
@@ -43,7 +42,11 @@ from etl.extract.extract_fundamental import extract_fundamental
 from etl.extract.extract_googlenews import extract_google_news
 from etl.extract.extract_interbank import extract_interbank_rate
 from etl.extract.extract_prices import extract_index_prices, extract_symbol_prices
+from etl.load_to_mysql import load_all, load_eod_rows
+from etl.load_to_parquet import cleanup_old_snapshots, save_processed_parquet
 from etl.logging_setup import get_logger, setup_logging
+from etl.run_metadata import complete_metadata, running_metadata, save_run_metadata
+from etl.transform.transform_aggregate import aggregate_all_ticks_to_eod
 from etl.transform.build_dataset import build_full_dataset, validate_dataset
 
 log = get_logger(__name__)
@@ -138,7 +141,7 @@ def _check_failure_gate(errors: dict[str, Exception], cfg: EtlConfig) -> None:
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
-def run(cfg: EtlConfig) -> Path:
+def _run_impl(cfg: EtlConfig) -> Path:
     setup_logging(cfg.log_dir)
     cfg.raw_dir.mkdir(parents=True, exist_ok=True)
     cfg.processed_dir.mkdir(parents=True, exist_ok=True)
@@ -184,16 +187,20 @@ def run(cfg: EtlConfig) -> Path:
         encoding="utf-8-sig",
         float_format="%.6f",
     )
-    
-    # Save parquet for high performance
+
+    # Keep root parquet for backward compatibility with older scripts.
     parquet_out = cfg.output_file.with_suffix(".parquet")
     dataset.to_parquet(parquet_out, index=False)
 
-    snapshot = cfg.processed_dir / f"market_data_{cfg.run_id}.csv"
-    snapshot_parquet = cfg.processed_dir / f"market_data_{cfg.run_id}.parquet"
-    
-    shutil.copy2(cfg.output_file, snapshot)
-    shutil.copy2(parquet_out, snapshot_parquet)
+    processed_parquet = save_processed_parquet(dataset, cfg)
+
+    if cfg.enable_mysql_load:
+        load_all(cfg, dataset)
+        if cfg.enable_tick_eod:
+            eod_rows = aggregate_all_ticks_to_eod(cfg.symbols, cfg, source=cfg.tick_source)
+            load_eod_rows(eod_rows)
+
+    cleanup_old_snapshots(cfg, keep=5)
 
     log.info(
         "Done: %s & .parquet rows=%d range=%s..%s symbols=%s snapshot=%s",
@@ -202,9 +209,32 @@ def run(cfg: EtlConfig) -> Path:
         dataset["data_date"].min(),
         dataset["data_date"].max(),
         ",".join(sorted(dataset["symbol"].unique().tolist())),
-        snapshot,
+        processed_parquet,
     )
     return cfg.output_file
+
+
+def run(cfg: EtlConfig) -> Path:
+    metadata = running_metadata(cfg)
+    save_run_metadata(metadata, cfg)
+    try:
+        output = _run_impl(cfg)
+        row_count = 0
+        parquet_path = cfg.processed_dir / f"market_data_{cfg.run_id}.parquet"
+        if parquet_path.exists():
+            try:
+                import pandas as pd
+
+                row_count = int(len(pd.read_parquet(parquet_path, columns=["symbol"])))
+            except Exception:
+                row_count = 0
+        complete_metadata(metadata, status="success", row_count=row_count, output_file=str(output))
+        save_run_metadata(metadata, cfg)
+        return output
+    except Exception as exc:
+        complete_metadata(metadata, status="failed", errors={"run": str(exc)})
+        save_run_metadata(metadata, cfg)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +286,18 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--google-news-period", default="7d",
         help="GoogleNews time period (e.g. 7d, 30d)",
     )
+    parser.add_argument(
+        "--disable-mysql-load", action="store_true", default=False,
+        help="Skip loading processed/raw outputs into MySQL cache tables",
+    )
+    parser.add_argument(
+        "--disable-tick-eod", action="store_true", default=False,
+        help="Skip intraday tick -> daily OHLCV aggregation",
+    )
+    parser.add_argument(
+        "--tick-source", default="lake", choices=["lake", "redis", "auto"],
+        help="Source for tick -> EOD aggregation",
+    )
     return parser
 
 
@@ -282,6 +324,9 @@ def main() -> None:
         enable_fundamental=args.enable_fundamental and not args.disable_fundamental,
         enable_google_news=args.enable_google_news and not args.disable_google_news,
         google_news_period=args.google_news_period,
+        enable_mysql_load=not args.disable_mysql_load,
+        enable_tick_eod=not args.disable_tick_eod,
+        tick_source=args.tick_source,
     )
     run(cfg)
 

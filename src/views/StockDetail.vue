@@ -132,6 +132,88 @@
           <TechnicalAnalysisChart :symbol="symbol" :fetch-technical="getTechnicalAnalysis" :refresh-token="technicalRefreshToken" />
         </section>
 
+        <section class="col-span-12 grid gap-4 xl:grid-cols-2">
+          <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+            <div class="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Tin tức</h2>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Nguồn Google News từ lần ETL gần nhất.</p>
+              </div>
+              <button
+                class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                :disabled="loadingNews"
+                @click="loadNewsAndEvents()"
+              >
+                Làm mới
+              </button>
+            </div>
+
+            <div v-if="loadingNews" class="py-8 text-sm text-gray-500 dark:text-gray-400">
+              Đang tải tin tức...
+            </div>
+            <div v-else-if="googleNewsItems.length === 0" class="py-8 text-sm text-gray-500 dark:text-gray-400">
+              Chưa có tin Google News cho mã này.
+            </div>
+            <div v-else class="space-y-3">
+              <a
+                v-for="item in googleNewsItems"
+                :key="item.id"
+                :href="item.url || undefined"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="block rounded-xl border border-gray-100 p-4 transition hover:border-brand-200 hover:bg-brand-50/50 dark:border-gray-800 dark:hover:border-brand-700 dark:hover:bg-brand-500/10"
+              >
+                <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span class="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
+                    {{ item.source || 'Google News' }}
+                  </span>
+                  <span>{{ formatNewsTime(item.publish_time || item.time) }}</span>
+                </div>
+                <h3 class="mt-2 line-clamp-2 text-sm font-semibold leading-6 text-gray-800 dark:text-white/90">
+                  {{ item.title }}
+                </h3>
+                <p v-if="item.summary" class="mt-1 line-clamp-2 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  {{ item.summary }}
+                </p>
+              </a>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+            <div class="mb-4">
+              <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Thông báo từ vnstock</h2>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Sự kiện doanh nghiệp và thông báo được cache từ vnstock.</p>
+            </div>
+
+            <div v-if="loadingNews" class="py-8 text-sm text-gray-500 dark:text-gray-400">
+              Đang tải thông báo...
+            </div>
+            <div v-else-if="vnstockEvents.length === 0" class="py-8 text-sm text-gray-500 dark:text-gray-400">
+              Chưa có thông báo vnstock cho mã này.
+            </div>
+            <div v-else class="space-y-3">
+              <div
+                v-for="item in vnstockEvents"
+                :key="item.id"
+                class="rounded-xl border border-gray-100 p-4 dark:border-gray-800"
+              >
+                <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span class="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                    vnstock
+                  </span>
+                  <span>{{ formatNewsTime(item.date) }}</span>
+                </div>
+                <h3 class="mt-2 text-sm font-semibold leading-6 text-gray-800 dark:text-white/90">
+                  {{ item.title || 'Thông báo doanh nghiệp' }}
+                </h3>
+                <p v-if="item.description" class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                  {{ item.description }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section
           class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
         >
@@ -239,7 +321,13 @@ import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vu
 import TradingViewChart from '@/components/stock/TradingViewChart.vue'
 import OrderLog from '@/components/stock/OrderLog.vue'
 import { VN30_TICKERS, useStockData } from '@/composables/useStockData'
-import { stockBackendApi, type CompanyOverview, type OrderTick } from '@/services/stockBackendApi'
+import {
+  stockBackendApi,
+  type CompanyOverview,
+  type MarketEventItem,
+  type MarketNewsItem,
+  type OrderTick,
+} from '@/services/stockBackendApi'
 
 type FinancialType = 'income' | 'balance' | 'cashflow' | 'ratios'
 
@@ -290,12 +378,15 @@ const historySeries = ref<HistoricalCandle[]>([])
 const chartTimeframe = ref<ChartTimeframe>('1d')
 const overview = ref<CompanyOverview | null>(null)
 const financialRows = ref<Record<string, unknown>[]>([])
+const googleNewsItems = ref<MarketNewsItem[]>([])
+const vnstockEvents = ref<MarketEventItem[]>([])
 const orderTicks = ref<OrderTick[]>([])
 const orderTicksCount = ref(0)
 const orderIsInSession = ref(false)
 const loadingOrderLog = ref(false)
 const loadingOverview = ref(false)
 const loadingFinancials = ref(false)
+const loadingNews = ref(false)
 const manualRefreshing = ref(false)
 const technicalRefreshToken = ref(0)
 const activeReportType = ref<FinancialType>('income')
@@ -466,6 +557,15 @@ function formatCell(value: unknown): string {
   return String(value)
 }
 
+function formatNewsTime(value: string | null | undefined): string {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+  }).format(parsed)
+}
+
 function reportTypeButtonClass(type: FinancialType): string {
   const isActive = activeReportType.value === type
   if (!isActive) {
@@ -530,6 +630,22 @@ async function loadFinancials(forceRefresh: boolean = false): Promise<void> {
     financialRows.value = []
   } finally {
     loadingFinancials.value = false
+  }
+}
+
+async function loadNewsAndEvents(forceRefresh: boolean = false): Promise<void> {
+  loadingNews.value = true
+
+  try {
+    const [googleNewsResult, eventsResult] = await Promise.allSettled([
+      stockBackendApi.getGoogleNews([symbol.value], 8),
+      stockBackendApi.getMarketEvents([symbol.value], 8, forceRefresh),
+    ])
+
+    googleNewsItems.value = googleNewsResult.status === 'fulfilled' ? googleNewsResult.value.data : []
+    vnstockEvents.value = eventsResult.status === 'fulfilled' ? eventsResult.value.data : []
+  } finally {
+    loadingNews.value = false
   }
 }
 
@@ -715,6 +831,7 @@ async function reloadSymbolData(forceRefresh: boolean = false): Promise<void> {
     loadFinancials(forceRefresh),
     loadHistory(forceRefresh),
     loadOrderLog(forceRefresh),
+    loadNewsAndEvents(forceRefresh),
   ])
 }
 

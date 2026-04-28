@@ -776,11 +776,16 @@ class VnstockFetcherService:
             if not is_vn30_symbol(normalized):
                 continue
 
-            if redis_client:
-                raw = redis_client.lrange(f"intraday:{normalized}", 0, -1)
-                source = [json.loads(x) for x in raw]
-            else:
-                source = []
+            try:
+                redis_client = get_redis()
+                if redis_client:
+                    raw = redis_client.lrange(f"intraday:{normalized}", 0, -1)
+                    source = [json.loads(x) for x in raw]
+                else:
+                    source = list(self._intraday_mem.get(normalized, []))
+            except Exception as exc:
+                logger.warning("Failed to read intraday Redis cache for %s: %s", normalized, exc)
+                source = list(self._intraday_mem.get(normalized, []))
             clipped = source[-max(limit, 1):]
             output[normalized] = list(reversed([dict(item) for item in clipped]))
 
@@ -792,6 +797,7 @@ class VnstockFetcherService:
         payload_rows: list[dict[str, Any]] = []
 
         try:
+            redis_client = get_redis()
             for symbol in VN30_SYMBOLS:
                 if redis_client:
                     raw = redis_client.lrange(f"intraday:{symbol}", 0, -1)
@@ -799,7 +805,7 @@ class VnstockFetcherService:
                     # Dump data lake parquet backup
                     dump_ticks_to_parquet(symbol, symbol_ticks)
                 else:
-                    symbol_ticks = []
+                    symbol_ticks = list(self._intraday_mem.get(symbol, []))
                 ticks = [
                     tick for tick in symbol_ticks
                     if _to_date(tick.get("time")) == today

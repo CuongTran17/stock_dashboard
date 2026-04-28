@@ -257,22 +257,22 @@ layer(base);
   scrollbar-width: none; /* Firefox */
 }
 
-@utility custom-scrollbar {
-  &::-webkit-scrollbar {
-    @apply size-1.5;
-  }
+.custom-scrollbar::-webkit-scrollbar {
+  width: 0.375rem;
+  height: 0.375rem;
+}
 
-  &::-webkit-scrollbar-track {
-    @apply rounded-full;
-  }
+.custom-scrollbar::-webkit-scrollbar-track {
+  border-radius: 9999px;
+}
 
-  &::-webkit-scrollbar-thumb {
-    @apply bg-gray-200 rounded-full dark:bg-gray-700;
-  }
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: #e5e7eb;
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #344054;
+  background-color: #374151;
 }
 
 @layer utilities {
@@ -532,7 +532,25 @@ span.flatpickr-weekday,
   border: transparent !important;
 }
 .fc .fc-view-harness {
-  @apply max-w-full overflow-x-auto custom-scrollbar;
+  @apply max-w-full overflow-x-auto;
+}
+
+.fc .fc-view-harness::-webkit-scrollbar {
+  width: 0.375rem;
+  height: 0.375rem;
+}
+
+.fc .fc-view-harness::-webkit-scrollbar-track {
+  border-radius: 9999px;
+}
+
+.fc .fc-view-harness::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background-color: #e5e7eb;
+}
+
+.dark .fc .fc-view-harness::-webkit-scrollbar-thumb {
+  background-color: #374151;
 }
 .fc-dayGridMonth-view.fc-view.fc-daygrid {
   @apply min-w-[718px];

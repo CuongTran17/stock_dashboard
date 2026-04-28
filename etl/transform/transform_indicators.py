@@ -21,13 +21,19 @@ def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return 100 - (100 / (1 + rs))
 
 
-def add_price_indicators(df: pd.DataFrame, close_col: str = "close_price") -> pd.DataFrame:
-    """Thêm SMA7, EMA21, RSI14, MACD(12,26) vào ``df`` (đã sort theo ngày)."""
+def add_price_indicators(
+    df: pd.DataFrame,
+    close_col: str = "close_price",
+    high_col: str = "high_price",
+    low_col: str = "low_price",
+    volume_col: str = "volume",
+) -> pd.DataFrame:
+    """Thêm các chỉ báo kỹ thuật vào ``df`` (đã sort theo ngày)."""
     if df.empty or close_col not in df.columns:
         return df
 
     out = df.copy()
-    close = out[close_col]
+    close = pd.to_numeric(out[close_col], errors="coerce")
 
     out["sma_7"] = close.rolling(window=7, min_periods=7).mean()
     out["ema_21"] = close.ewm(span=21, adjust=False).mean()
@@ -36,5 +42,34 @@ def add_price_indicators(df: pd.DataFrame, close_col: str = "close_price") -> pd
     ema_fast = close.ewm(span=12, adjust=False).mean()
     ema_slow = close.ewm(span=26, adjust=False).mean()
     out["macd"] = ema_fast - ema_slow
+    out["macd_signal"] = out["macd"].ewm(span=9, adjust=False).mean()
+    out["macd_histogram"] = out["macd"] - out["macd_signal"]
+
+    bb_middle = close.rolling(window=20, min_periods=20).mean()
+    bb_std = close.rolling(window=20, min_periods=20).std()
+    out["bb_upper"] = bb_middle + (2 * bb_std)
+    out["bb_lower"] = bb_middle - (2 * bb_std)
+
+    if volume_col in out.columns:
+        volume = pd.to_numeric(out[volume_col], errors="coerce")
+        out["vol_sma_20"] = volume.rolling(window=20, min_periods=20).mean()
+    else:
+        out["vol_sma_20"] = pd.NA
+
+    if high_col in out.columns and low_col in out.columns:
+        high = pd.to_numeric(out[high_col], errors="coerce")
+        low = pd.to_numeric(out[low_col], errors="coerce")
+        prev_close = close.shift(1)
+        true_range = pd.concat(
+            [
+                high - low,
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+        out["atr_14"] = true_range.rolling(window=14, min_periods=14).mean()
+    else:
+        out["atr_14"] = pd.NA
 
     return out

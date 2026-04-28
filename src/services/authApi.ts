@@ -157,6 +157,79 @@ export interface FlashSalePayload {
   is_active: boolean
 }
 
+export interface EtlRunMetadata {
+  run_id: string
+  started_at: string
+  completed_at: string | null
+  status: 'running' | 'success' | 'failed' | string
+  symbols: string[]
+  row_count: number
+  errors: Record<string, string>
+  duration_seconds: number
+  output_file?: string | null
+}
+
+export interface EtlSnapshotMetadata {
+  run_id?: string
+  row_count?: number
+  columns?: string[]
+  date_range?: { min?: string | null; max?: string | null }
+  symbols?: string[]
+  schema_version?: number
+  quality_summary?: {
+    outlier_count?: number
+    duplicate_rows?: number
+    columns_with_missing?: number
+    top_missing_columns?: Record<string, number>
+  }
+  checksum_sha256?: string
+  _path?: string
+  _mtime?: string
+}
+
+export interface EtlStatusResponse {
+  status: string
+  details: string
+  last_run_id?: string | null
+  last_run_time?: string | null
+  row_count?: number | null
+  symbols: string[]
+}
+
+export interface EtlHealthResponse {
+  status: string
+  details: string
+  age_hours?: number | null
+  missing_symbols: string[]
+  disk?: {
+    total_bytes: number
+    used_bytes: number
+    free_bytes: number
+    free_ratio?: number | null
+  } | null
+  latest_run?: EtlRunMetadata | null
+  latest_snapshot?: EtlSnapshotMetadata | null
+}
+
+export interface EtlRunsResponse {
+  count: number
+  runs: EtlRunMetadata[]
+}
+
+export interface EtlTriggerPayload {
+  symbols?: string[]
+  start_date?: string
+  end_date?: string
+  disable_mysql_load?: boolean
+  disable_tick_eod?: boolean
+}
+
+export interface EtlTriggerResponse {
+  run_id: string
+  status: string
+  symbols: string[]
+}
+
 // ── Token Management ────────────────────────────────────────────────
 
 export function getToken(): string | null {
@@ -224,12 +297,12 @@ async function authFetch<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 401) {
       removeToken()
       if (!path.includes('/auth/login') && !path.includes('/auth/register')) {
-        window.location.href = '/auth/signin'
+        window.location.href = '/signin'
       }
     } else if (response.status === 403 && msg.includes('khóa')) {
       // Locked account — clear token so UI doesn't keep retrying
       removeToken()
-      window.location.href = '/auth/signin?locked=1'
+      window.location.href = '/signin?locked=1'
     }
 
     throw new Error(msg)
@@ -455,4 +528,25 @@ export async function setFlashSaleStatus(
 
 export async function deleteFlashSale(flashSaleId: number): Promise<{ message: string }> {
   return authFetch(`/api/admin/flash-sales/${flashSaleId}`, { method: 'DELETE' })
+}
+
+// ── ETL Admin Endpoints ─────────────────────────────────────────────
+
+export async function getEtlStatus(): Promise<EtlStatusResponse> {
+  return authFetch<EtlStatusResponse>('/api/etl/status')
+}
+
+export async function getEtlHealth(): Promise<EtlHealthResponse> {
+  return authFetch<EtlHealthResponse>('/api/etl/health')
+}
+
+export async function getEtlRuns(limit: number = 10): Promise<EtlRunsResponse> {
+  return authFetch<EtlRunsResponse>(`/api/etl/runs?limit=${encodeURIComponent(String(limit))}`)
+}
+
+export async function triggerEtlRun(payload: EtlTriggerPayload = {}): Promise<EtlTriggerResponse> {
+  return authFetch<EtlTriggerResponse>('/api/etl/trigger', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }

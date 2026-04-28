@@ -1,0 +1,119 @@
+"""ETL status and trigger endpoints."""
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from src.api.auth import require_role
+from src.database.models import User
+from src.services.vnstock_fetcher import VN30_SYMBOLS
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from etl.config import DEFAULT_SYMBOLS, EtlConfig
+from etl.health import check_etl_health, get_recent_runs
+from etl.run_etl import run
+
+router = APIRouter(prefix="/api/etl", tags=["ETL"])
+_require_admin = require_role("admin")
+_last_trigger_at: datetime | None = None
+_trigger_lock = asyncio.Lock()
+
+
+class TriggerRequest(BaseModel):
+    symbols: Optional[list[str]] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    disable_mysql_load: bool = False
+    disable_tick_eod: bool = False
+
+
+def _default_cfg(symbols: list[str] | None = None) -> EtlConfig:
+    today = date.today()
+    selected = symbols or [item.strip().upper() for item in os.getenv("ETL_SYMBOLS", "").split(",") if item.strip()]
+    if not selected:
+        selected = list(DEFAULT_SYMBOLS or VN30_SYMBOLS)
+    return EtlConfig.from_args(
+        start_date=today - timedelta(days=int(os.getenv("ETL_LOOKBACK_DAYS", "365"))),
+        end_date=today,
+        symbols=selected,
+        enable_mysql_load=True,
+        tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+    )
+
+
+@router.get("/status")
+async def get_etl_status() -> dict:
+    health = check_etl_health(_default_cfg())
+    latest = health.get("latest_run") or {}
+    snapshot = health.get("latest_snapshot") or {}
+    return {
+        "status": health["status"],
+        "details": health["details"],
+        "last_run_id": latest.get("run_id") or snapshot.get("run_id"),
+        "last_run_time": latest.get("completed_at") or snapshot.get("_mtime"),
+        "row_count": latest.get("row_count") or snapshot.get("row_count"),
+        "symbols": latest.get("symbols") or snapshot.get("symbols") or [],
+    }
+
+
+@router.get("/runs")
+async def get_etl_runs(limit: int = Query(default=10, ge=1, le=100)) -> dict:
+    runs = get_recent_runs(_default_cfg(), limit=limit)
+    return {"count": len(runs), "runs": runs}
+
+
+@router.get("/health")
+async def get_etl_health() -> dict:
+    return check_etl_health(_default_cfg())
+
+
+@router.post("/trigger")
+async def trigger_etl_run(
+    body: TriggerRequest | None = None,
+    current_user: User = Depends(_require_admin),
+) -> dict:
+    del current_user
+    global _last_trigger_at
+    now = datetime.now(timezone.utc)
+    async with _trigger_lock:
+        if _last_trigger_at and (now - _last_trigger_at).total_seconds() < 1800:
+            raise HTTPException(status_code=429, detail="ETL trigger is rate-limited to once every 30 minutes")
+        _last_trigger_at = now
+
+    body = body or TriggerRequest()
+    symbols = [item.strip().upper() for item in (body.symbols or []) if item.strip()]
+    cfg = _default_cfg(symbols or None)
+    if body.start_date and body.end_date:
+        cfg = EtlConfig.from_args(
+            start_date=body.start_date,
+            end_date=body.end_date,
+            symbols=symbols or cfg.symbols,
+            enable_mysql_load=not body.disable_mysql_load,
+            enable_tick_eod=not body.disable_tick_eod,
+            tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+        )
+    else:
+        cfg = EtlConfig.from_args(
+            start_date=cfg.user_start,
+            end_date=cfg.user_end,
+            symbols=symbols or cfg.symbols,
+            enable_mysql_load=not body.disable_mysql_load,
+            enable_tick_eod=not body.disable_tick_eod,
+            tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+        )
+
+    async def _run_background() -> None:
+        await asyncio.get_running_loop().run_in_executor(None, run, cfg)
+
+    asyncio.create_task(_run_background(), name=f"manual-etl-{cfg.run_id}")
+    return {"run_id": cfg.run_id, "status": "started", "symbols": cfg.symbols}

@@ -399,6 +399,22 @@ class StockBackendApi {
     return this.fetch<MarketNewsResponse>(`/api/news${query}`)
   }
 
+  async getGoogleNews(
+    symbols?: string[],
+    limit: number = 12,
+  ): Promise<MarketNewsResponse> {
+    const normalized = (symbols || [])
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter((symbol) => symbol.length > 0)
+
+    const query = this.buildQuery({
+      symbols: normalized.length > 0 ? normalized.join(',') : undefined,
+      limit,
+    })
+
+    return this.fetch<MarketNewsResponse>(`/api/google-news${query}`)
+  }
+
   async getMarketEvents(
     symbols?: string[],
     limit: number = 24,

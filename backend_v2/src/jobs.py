@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 logger = logging.getLogger(__name__)
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def build_lifespan(
@@ -21,6 +28,34 @@ def build_lifespan(
     preload_reference_symbol_limit: int,
 ) -> Callable[[Any], Any]:
     scheduler = AsyncIOScheduler(timezone="Asia/Ho_Chi_Minh")
+
+    def _etl_symbols() -> list[str]:
+        raw = os.getenv("ETL_SYMBOLS", "")
+        if raw.strip():
+            return [item.strip().upper() for item in raw.replace(";", ",").split(",") if item.strip()]
+        return list(vn30_symbols)
+
+    def _etl_cfg_factory():
+        from datetime import date, timedelta
+
+        from etl.config import EtlConfig
+
+        today = date.today()
+        return EtlConfig.from_args(
+            start_date=today - timedelta(days=int(os.getenv("ETL_LOOKBACK_DAYS", "365"))),
+            end_date=today,
+            symbols=_etl_symbols(),
+            enable_mysql_load=True,
+            tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+        )
+
+    async def _warmup_caches() -> None:
+        scope = os.getenv("ETL_CACHE_WARMUP_SCOPE", "etl").lower()
+        symbols = vn30_symbols if scope == "vn30" else _etl_symbols()
+        logger.info("Starting ETL cache warmup scope=%s symbols=%d", scope, len(symbols))
+        await fundamental_service.preload_reference_caches(symbols, force_refresh=True)
+        await fetcher_service.preload_historical_data(symbols)
+        logger.info("ETL cache warmup completed")
 
     @asynccontextmanager
     async def lifespan(app: Any):
@@ -44,7 +79,8 @@ def build_lifespan(
                 name="vn30-reference-preload",
             )
 
-        if not scheduler.get_job("vn30-eod-job"):
+        legacy_eod_enabled = os.getenv("VN30_EOD_JOB_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+        if legacy_eod_enabled and not scheduler.get_job("vn30-eod-job"):
             scheduler.add_job(
                 lambda: fetcher_service.aggregate_today_intraday_to_daily(),
                 "cron",
@@ -53,6 +89,15 @@ def build_lifespan(
                 hour=15,
                 minute=15,
             )
+        elif not legacy_eod_enabled:
+            logger.info("Legacy vn30-eod-job disabled; ETL tick EOD aggregation is authoritative")
+        try:
+            from etl.scheduler import EtlScheduler
+
+            etl_scheduler = EtlScheduler(scheduler=scheduler)
+            etl_scheduler.register_jobs(cfg_factory=_etl_cfg_factory, cache_refresh=_warmup_caches)
+        except Exception as exc:
+            logger.warning("Could not register ETL scheduler jobs: %s", exc)
         if not scheduler.running:
             scheduler.start()
 
