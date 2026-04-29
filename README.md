@@ -95,6 +95,15 @@ Khởi tạo database:
 mysql -u root -p < backend_v2\init_database.sql
 ```
 
+Schema migrations are managed by Alembic:
+
+```powershell
+cd backend_v2
+..\.venv\Scripts\alembic.exe -c alembic.ini upgrade head
+```
+
+For local databases created before Alembic was added, the app can stamp the baseline automatically on startup. Keep `DB_LEGACY_AUTO_DDL=true` only for development; set it to `false` in production after migrations are established.
+
 ### 2. Frontend
 
 ```powershell

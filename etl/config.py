@@ -133,6 +133,9 @@ class EtlConfig:
     enable_mysql_load: bool = True
     enable_tick_eod: bool = True
     tick_source: str = "lake"  # "lake" | "redis" | "auto"
+    run_mode: str = "full"  # "full" | "incremental" | "backfill"
+    incremental_overlap_days: int = 7
+    merge_with_latest: bool = True
 
     # Identifier đóng băng cho mỗi lần chạy.
     run_id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%dT%H%M%S"))
@@ -150,6 +153,18 @@ class EtlConfig:
     @property
     def processed_dir(self) -> Path:
         return self.lake_dir / "processed"
+
+    @property
+    def bronze_dir(self) -> Path:
+        return self.lake_dir / "bronze"
+
+    @property
+    def silver_dir(self) -> Path:
+        return self.lake_dir / "silver"
+
+    @property
+    def gold_dir(self) -> Path:
+        return self.lake_dir / "gold"
 
     # --- Helpers -----------------------------------------------------------
     def raw_path(self, category: str, symbol: str | None = None, suffix: str = "csv") -> Path:
@@ -192,6 +207,9 @@ class EtlConfig:
         enable_mysql_load: bool = True,
         enable_tick_eod: bool = True,
         tick_source: str = "lake",
+        run_mode: str = "full",
+        incremental_overlap_days: int = 7,
+        merge_with_latest: bool = True,
     ) -> "EtlConfig":
         return cls(
             user_start=cls.parse_date(start_date),
@@ -210,4 +228,7 @@ class EtlConfig:
             enable_mysql_load=enable_mysql_load,
             enable_tick_eod=enable_tick_eod,
             tick_source=tick_source,
+            run_mode=run_mode,
+            incremental_overlap_days=incremental_overlap_days,
+            merge_with_latest=merge_with_latest,
         )

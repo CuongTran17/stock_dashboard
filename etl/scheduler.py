@@ -41,6 +41,7 @@ def default_cfg_factory(
         enable_fundamental=enable_fundamental,
         enable_google_news=enable_google_news,
         enable_mysql_load=enable_mysql_load,
+        run_mode="incremental",
     )
 
 
@@ -118,6 +119,7 @@ class EtlScheduler:
             enable_fundamental=True,
             enable_google_news=False,
             enable_mysql_load=False,
+            run_mode="backfill",
         )
         from etl.extract.extract_fundamental import extract_all_fundamentals
 

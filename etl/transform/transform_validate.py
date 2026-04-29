@@ -9,6 +9,34 @@ from etl.logging_setup import get_logger
 
 log = get_logger(__name__)
 
+REQUIRED_OUTPUT_COLUMNS = [
+    "symbol",
+    "data_date",
+    "open_price",
+    "high_price",
+    "low_price",
+    "close_price",
+    "volume",
+]
+
+CRITICAL_NOT_NULL_COLUMNS = [
+    "symbol",
+    "data_date",
+    "close_price",
+]
+
+
+class QualityContractError(RuntimeError):
+    """Raised when the processed dataset violates a hard quality contract."""
+
+
+def _count_nulls(df: pd.DataFrame, columns: list[str]) -> dict[str, int]:
+    return {
+        column: int(df[column].isna().sum())
+        for column in columns
+        if column in df.columns and int(df[column].isna().sum()) > 0
+    }
+
 
 def _detect_price_outliers(df: pd.DataFrame, price_col: str = "close_price") -> pd.Series:
     if df.empty or price_col not in df.columns:
@@ -122,3 +150,109 @@ def report_quality_metrics(df: pd.DataFrame, symbol: str) -> dict[str, object]:
         metrics["outliers"],
     )
     return metrics
+
+
+def build_quality_contract_report(
+    df: pd.DataFrame,
+    expected_symbols: list[str] | None = None,
+) -> dict[str, object]:
+    """Build a dataset-level quality report for the final processed output."""
+    missing_required = [column for column in REQUIRED_OUTPUT_COLUMNS if column not in df.columns]
+    if missing_required:
+        return {
+            "status": "failed",
+            "row_count": int(len(df)),
+            "missing_required_columns": missing_required,
+            "errors": [f"Missing required columns: {missing_required}"],
+        }
+
+    dates = pd.to_datetime(df["data_date"], errors="coerce")
+    close = pd.to_numeric(df["close_price"], errors="coerce")
+    open_price = pd.to_numeric(df["open_price"], errors="coerce")
+    high = pd.to_numeric(df["high_price"], errors="coerce")
+    low = pd.to_numeric(df["low_price"], errors="coerce")
+    volume = pd.to_numeric(df["volume"], errors="coerce")
+
+    duplicate_symbol_date = int(df.duplicated(["symbol", "data_date"], keep=False).sum())
+    invalid_date_count = int(dates.isna().sum())
+    non_positive_close_count = int((close <= 0).fillna(False).sum())
+    negative_volume_count = int((volume < 0).fillna(False).sum())
+    invalid_ohlc_count = int(((high < low) | (open_price > high) | (open_price < low) | (close > high) | (close < low)).fillna(False).sum())
+    outlier_count = int(df["is_outlier"].fillna(False).sum()) if "is_outlier" in df.columns else 0
+    missing_counts = df.isna().sum().sort_values(ascending=False)
+
+    symbols = sorted(str(item) for item in df["symbol"].dropna().unique().tolist())
+    expected = sorted(set(expected_symbols or []))
+    missing_symbols = sorted(set(expected) - set(symbols))
+
+    null_critical_counts = _count_nulls(df, CRITICAL_NOT_NULL_COLUMNS)
+
+    errors: list[str] = []
+    if null_critical_counts:
+        errors.append(f"Null critical values: {null_critical_counts}")
+    if invalid_date_count:
+        errors.append(f"Invalid data_date rows: {invalid_date_count}")
+    if duplicate_symbol_date:
+        errors.append(f"Duplicate symbol/data_date rows: {duplicate_symbol_date}")
+    if non_positive_close_count:
+        errors.append(f"Non-positive close_price rows: {non_positive_close_count}")
+    if negative_volume_count:
+        errors.append(f"Negative volume rows: {negative_volume_count}")
+    if invalid_ohlc_count:
+        errors.append(f"Invalid OHLC relationship rows: {invalid_ohlc_count}")
+
+    warnings: list[str] = []
+    if missing_symbols:
+        warnings.append(f"Missing expected symbols: {missing_symbols}")
+
+    return {
+        "status": "failed" if errors else "passed",
+        "row_count": int(len(df)),
+        "symbol_count": int(len(symbols)),
+        "symbols": symbols,
+        "missing_expected_symbols": missing_symbols,
+        "date_range": {
+            "min": str(dates.min().date()) if dates.notna().any() else None,
+            "max": str(dates.max().date()) if dates.notna().any() else None,
+        },
+        "null_critical_counts": null_critical_counts,
+        "duplicate_symbol_date_rows": duplicate_symbol_date,
+        "invalid_date_rows": invalid_date_count,
+        "non_positive_close_rows": non_positive_close_count,
+        "negative_volume_rows": negative_volume_count,
+        "invalid_ohlc_rows": invalid_ohlc_count,
+        "outlier_count": outlier_count,
+        "duplicate_rows": int(df.duplicated().sum()),
+        "columns_with_missing": int((missing_counts > 0).sum()),
+        "top_missing_columns": {
+            str(column): int(count)
+            for column, count in missing_counts[missing_counts > 0].head(10).items()
+        },
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def enforce_quality_contract(
+    df: pd.DataFrame,
+    expected_symbols: list[str] | None = None,
+) -> dict[str, object]:
+    """Raise on hard contract failures and return the full quality report."""
+    report = build_quality_contract_report(df, expected_symbols=expected_symbols)
+    errors = list(report.get("errors") or [])
+    if report.get("missing_required_columns"):
+        errors.append(str(report["missing_required_columns"]))
+
+    if errors:
+        raise QualityContractError("; ".join(errors))
+
+    warnings = report.get("warnings") or []
+    if warnings:
+        log.warning("Quality contract warnings: %s", warnings)
+    log.info(
+        "Quality contract passed rows=%s symbols=%s outliers=%s",
+        report.get("row_count"),
+        report.get("symbol_count"),
+        report.get("outlier_count"),
+    )
+    return report

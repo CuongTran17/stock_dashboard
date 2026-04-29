@@ -27,6 +27,13 @@ const WS_URL = _backendBase
 const RECONNECT_DELAY = 3000
 const MAX_RECONNECT_ATTEMPTS = 2
 const HEARTBEAT_INTERVAL = 30000
+const DEBUG_WS = import.meta.env.VITE_DEBUG_WS === 'true'
+
+function debugWs(message: string): void {
+  if (DEBUG_WS) {
+    console.debug(message)
+  }
+}
 
 class DnseWebSocketService {
   private ws: WebSocket | null = null
@@ -60,7 +67,7 @@ class DnseWebSocketService {
       this.ws.onopen = () => {
         this.isConnecting = false
         this.reconnectAttempts = 0
-        console.log('[DNSE WS] Connected via wrapper')
+        debugWs('[DNSE WS] Connected via wrapper')
         this.notifyConnectionStatus('connected')
         this.startHeartbeat()
 
@@ -74,7 +81,7 @@ class DnseWebSocketService {
         this.isConnecting = false
         this.ws = null
         this.stopHeartbeat()
-        console.log(`[DNSE WS] Disconnected. Code: ${event.code}, Reason: ${event.reason}`)
+        debugWs(`[DNSE WS] Disconnected. Code: ${event.code}, Reason: ${event.reason}`)
         this.notifyConnectionStatus('disconnected')
         this.scheduleReconnect()
       }
@@ -239,7 +246,7 @@ class DnseWebSocketService {
     const delay = RECONNECT_DELAY * Math.pow(1.5, this.reconnectAttempts)
     this.reconnectAttempts++
 
-    console.log(`[DNSE WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempts})`)
+    debugWs(`[DNSE WS] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempts})`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()

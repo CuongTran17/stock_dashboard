@@ -1,31 +1,24 @@
 import logging
-import os
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from .models import Base
+from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-
-# Load backend_v2/.env first so local backend settings win over root defaults.
-load_dotenv(BASE_DIR / ".env")
-load_dotenv()
+settings = get_settings()
 
 # MySQL Database Connection String
 # Example: mysql+mysqlconnector://user:password@localhost/dbname
-DB_URL = os.getenv("MYSQL_URL", "mysql+mysqlconnector://root:@localhost/vnstock_data")
-ASYNC_DB_URL = os.getenv(
-    "MYSQL_ASYNC_URL",
-    DB_URL.replace("mysql+mysqlconnector://", "mysql+aiomysql://"),
-)
+DB_URL = settings.mysql_url
+ASYNC_DB_URL = settings.resolved_mysql_async_url
 
 engine = create_engine(
     DB_URL,
@@ -209,12 +202,83 @@ def _create_all_with_retry(max_attempts: int = 5) -> None:
             time.sleep(wait_seconds)
 
 
-def init_db():
+def _alembic_config():
+    try:
+        from alembic.config import Config
+    except ImportError:
+        return None
+
+    config_path = BASE_DIR / "alembic.ini"
+    if not config_path.exists():
+        return None
+
+    config = Config(str(config_path))
+    config.set_main_option("script_location", str(BASE_DIR / "alembic"))
+    config.set_main_option("sqlalchemy.url", DB_URL)
+    return config
+
+
+def _has_alembic_version_table() -> bool:
+    try:
+        return inspect(engine).has_table("alembic_version")
+    except Exception as exc:
+        logger.warning("Could not inspect alembic_version table: %s", exc)
+        return False
+
+
+def _has_existing_application_schema() -> bool:
+    try:
+        tables = set(inspect(engine).get_table_names())
+    except Exception as exc:
+        logger.warning("Could not inspect existing DB schema: %s", exc)
+        return False
+
+    application_tables = set(Base.metadata.tables.keys())
+    return bool(tables & application_tables)
+
+
+def _run_migrations() -> bool:
+    config = _alembic_config()
+    if config is None:
+        logger.warning("Alembic is not installed or backend_v2/alembic.ini is missing.")
+        return False
+
+    from alembic import command
+
+    if _has_existing_application_schema() and not _has_alembic_version_table():
+        logger.info("Existing schema detected without alembic_version; stamping Alembic baseline.")
+        command.stamp(config, "head")
+        return True
+
+    command.upgrade(config, "head")
+    return True
+
+
+def _run_legacy_auto_ddl() -> None:
     _create_all_with_retry()
     _ensure_payload_columns_longtext()
     _ensure_user_profile_columns()
     _ensure_subscription_columns()
     _ensure_user_portfolio_columns()
+
+
+def init_db():
+    migrations_enabled = settings.db_migrations_enabled
+    legacy_auto_ddl = settings.db_legacy_auto_ddl
+
+    migrated = False
+    if migrations_enabled:
+        try:
+            migrated = _run_migrations()
+        except Exception as exc:
+            if not legacy_auto_ddl:
+                raise
+            logger.warning("Alembic migration failed; falling back to legacy auto-DDL: %s", exc)
+
+    if legacy_auto_ddl:
+        _run_legacy_auto_ddl()
+    elif not migrated and not migrations_enabled:
+        logger.warning("DB_MIGRATIONS_ENABLED=false and DB_LEGACY_AUTO_DDL=false; DB schema was not initialized.")
 
 
 def get_db():

@@ -214,15 +214,11 @@ const handleClickOutside = (event) => {
 
 const handleItemClick = (event) => {
   event.preventDefault()
-  // Handle the item click action here
-  console.log('Notification item clicked')
   closeDropdown()
 }
 
 const handleViewAllClick = (event) => {
   event.preventDefault()
-  // Handle the "View All Notification" action here
-  console.log('View All Notifications clicked')
   closeDropdown()
 }
 

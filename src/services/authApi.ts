@@ -4,13 +4,7 @@
  * Manages JWT authentication, user state, and API calls for auth/payment/portfolio.
  */
 
-function normalizeBackendUrl(rawUrl?: string): string {
-  const value = (rawUrl || '').trim()
-  if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
-  if (value.startsWith(':')) return `http://127.0.0.1${value}`
-  return `http://${value}`.replace(/\/+$/, '')
-}
+import { ApiError, backendFetch, normalizeBackendUrl } from './httpClient'
 
 const BACKEND_URL = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 
@@ -167,6 +161,36 @@ export interface EtlRunMetadata {
   errors: Record<string, string>
   duration_seconds: number
   output_file?: string | null
+  run_mode?: string
+  effective_start_date?: string | null
+  effective_end_date?: string | null
+  phase_durations?: Record<string, number>
+  row_counts?: Record<string, number>
+  extract_errors?: Record<string, string>
+  symbol_status?: Record<string, string>
+  quality_report?: EtlQualitySummary
+  artifacts?: Record<string, string>
+}
+
+export interface EtlQualitySummary {
+  status?: string
+  row_count?: number
+  symbol_count?: number
+  symbols?: string[]
+  missing_expected_symbols?: string[]
+  date_range?: { min?: string | null; max?: string | null }
+  null_critical_counts?: Record<string, number>
+  duplicate_symbol_date_rows?: number
+  invalid_date_rows?: number
+  non_positive_close_rows?: number
+  negative_volume_rows?: number
+  invalid_ohlc_rows?: number
+  outlier_count?: number
+  duplicate_rows?: number
+  columns_with_missing?: number
+  top_missing_columns?: Record<string, number>
+  errors?: string[]
+  warnings?: string[]
 }
 
 export interface EtlSnapshotMetadata {
@@ -176,12 +200,7 @@ export interface EtlSnapshotMetadata {
   date_range?: { min?: string | null; max?: string | null }
   symbols?: string[]
   schema_version?: number
-  quality_summary?: {
-    outlier_count?: number
-    duplicate_rows?: number
-    columns_with_missing?: number
-    top_missing_columns?: Record<string, number>
-  }
+  quality_summary?: EtlQualitySummary
   checksum_sha256?: string
   _path?: string
   _mtime?: string
@@ -281,34 +300,33 @@ export function logout(): void {
 async function authFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(init?.headers as Record<string, string> || {}),
   }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(`${BACKEND_URL}${path}`, { ...init, headers })
+  try {
+    return await backendFetch<T>(BACKEND_URL, path, { ...init, headers })
+  } catch (error) {
+    if (!(error instanceof ApiError)) {
+      throw error
+    }
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ detail: response.statusText }))
-    const msg = body.detail || body.error || body.message || `Error ${response.status}`
-
-    if (response.status === 401) {
+    if (error.status === 401) {
       removeToken()
       if (!path.includes('/auth/login') && !path.includes('/auth/register')) {
         window.location.href = '/signin'
       }
-    } else if (response.status === 403 && msg.includes('khóa')) {
+    } else if (error.status === 403 && error.message.includes('khóa')) {
       // Locked account — clear token so UI doesn't keep retrying
       removeToken()
       window.location.href = '/signin?locked=1'
     }
 
-    throw new Error(msg)
+    throw new Error(error.message)
   }
 
-  return response.json() as Promise<T>
 }
 
 // ── Auth Endpoints ──────────────────────────────────────────────────

@@ -1,12 +1,14 @@
 import asyncio
-import os
 import time
+
+from src.settings import get_settings
 
 
 class VnstockRateLimiter:
     def __init__(self) -> None:
-        configured_interval = float(os.getenv("VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS", "1.05"))
-        max_per_minute = max(int(os.getenv("VNSTOCK_MAX_REQUESTS_PER_MINUTE", "55")), 1)
+        settings = get_settings()
+        configured_interval = settings.vnstock_min_request_interval_seconds
+        max_per_minute = settings.vnstock_max_requests_per_minute
         min_interval_from_quota = 60.0 / float(max_per_minute)
 
         # Keep a conservative pacing for community quota and allow override via env.

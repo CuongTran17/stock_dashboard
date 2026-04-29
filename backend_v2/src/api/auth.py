@@ -4,7 +4,6 @@ Provides /register, /login, /me endpoints with JWT token management.
 Adapted from the ptit-learning-mobile auth pattern for FastAPI.
 """
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -21,18 +20,17 @@ from sqlalchemy.orm import Session
 
 from src.database.db import get_db
 from src.database.models import User
+from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 # ── Security Config ──────────────────────────────────────────────────
-JWT_SECRET = os.getenv("JWT_SECRET", "stockai_jwt_secret_change_me_in_production")
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
-
-if JWT_SECRET == "stockai_jwt_secret_change_me_in_production":
-    logger.warning("JWT_SECRET is using the insecure default value. Set JWT_SECRET in .env before deploying.")
+settings = get_settings()
+JWT_SECRET = settings.jwt_secret
+JWT_ALGORITHM = settings.jwt_algorithm
+JWT_EXPIRE_HOURS = settings.jwt_expire_hours
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 

@@ -3,11 +3,11 @@
     <div
       :class="[
         'w-2 h-2 rounded-full',
-        connected ? 'bg-success-500 animate-pulse' : 'bg-gray-400',
+        indicatorClass,
       ]"
     ></div>
     <span class="text-xs text-gray-500 dark:text-gray-400">
-      {{ connected ? 'Trực tiếp' : 'Ngoại tuyến' }}
+      {{ statusLabel }}
     </span>
     <span v-if="lastUpdate" class="text-xs text-gray-400 dark:text-gray-500">
       {{ formatTime(lastUpdate) }}
@@ -16,10 +16,35 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+
+const props = defineProps<{
   connected: boolean
+  backendAvailable?: boolean
   lastUpdate?: Date
 }>()
+
+const now = ref(Date.now())
+let staleTimer: ReturnType<typeof window.setInterval> | null = null
+
+const isStale = computed(() => {
+  if (!props.lastUpdate) return false
+  return now.value - props.lastUpdate.getTime() > 120000
+})
+
+const statusLabel = computed(() => {
+  if (props.connected) return 'Trực tiếp'
+  if (props.backendAvailable && !isStale.value) return 'Polling'
+  if (props.backendAvailable) return 'Dữ liệu cũ'
+  return 'Ngoại tuyến'
+})
+
+const indicatorClass = computed(() => {
+  if (props.connected) return 'bg-success-500 animate-pulse'
+  if (props.backendAvailable && !isStale.value) return 'bg-brand-500'
+  if (props.backendAvailable) return 'bg-warning-500'
+  return 'bg-gray-400'
+})
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString('vi-VN', {
@@ -28,4 +53,16 @@ function formatTime(date: Date): string {
     second: '2-digit',
   })
 }
+
+onMounted(() => {
+  staleTimer = window.setInterval(() => {
+    now.value = Date.now()
+  }, 30000)
+})
+
+onUnmounted(() => {
+  if (staleTimer) {
+    window.clearInterval(staleTimer)
+  }
+})
 </script>

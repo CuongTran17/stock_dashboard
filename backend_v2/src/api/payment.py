@@ -10,7 +10,6 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import re
 import time
 import base64
@@ -24,25 +23,27 @@ from sqlalchemy.orm import Session
 from src.api.auth import require_auth
 from src.database.db import get_db
 from src.database.models import FlashSale, PromotionCode, User, UserSubscription
+from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/payment", tags=["Payment"])
 
 # ── Sepay Config ────────────────────────────────────────────────────
-SEPAY_SECRET_KEY = os.getenv("SEPAY_SECRET_KEY", "spsk_test_41D8f24AyGBisC86uHtT4F8zEDvRHUF8")
-SEPAY_MERCHANT_ID = os.getenv("SEPAY_MERCHANT_ID", "SP-TEST-TD54A554")
-SEPAY_ENV = os.getenv("SEPAY_ENV", "sandbox").strip().lower()
-SEPAY_BANK_ACCOUNT = os.getenv("SEPAY_BANK_ACCOUNT", "")
-SEPAY_BANK_NAME = os.getenv("SEPAY_BANK_NAME", "MB")
-SEPAY_ACCOUNT_NAME = os.getenv("SEPAY_ACCOUNT_NAME", "")
+settings = get_settings()
+SEPAY_SECRET_KEY = settings.sepay_secret_key
+SEPAY_MERCHANT_ID = settings.sepay_merchant_id
+SEPAY_ENV = settings.sepay_env.strip().lower()
+SEPAY_BANK_ACCOUNT = settings.sepay_bank_account
+SEPAY_BANK_NAME = settings.sepay_bank_name
+SEPAY_ACCOUNT_NAME = settings.sepay_account_name
 
 # Premium subscription price (VND)
-PREMIUM_PRICE = int(os.getenv("PREMIUM_PRICE", "99000"))
-PREMIUM_DURATION_DAYS = int(os.getenv("PREMIUM_DURATION_DAYS", "30"))
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-SEPAY_IPN_URL = os.getenv("SEPAY_IPN_URL") or os.getenv("IPN_URL") or f"{BACKEND_URL}/api/payment/sepay/webhook"
+PREMIUM_PRICE = settings.premium_price
+PREMIUM_DURATION_DAYS = settings.premium_duration_days
+FRONTEND_URL = settings.frontend_url
+BACKEND_URL = settings.backend_url
+SEPAY_IPN_URL = settings.resolved_sepay_ipn_url
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
@@ -257,7 +258,7 @@ def _build_sepay_checkout_fields(
 
     # Determine which frontend URL to use for callbacks
     # Use ngrok domain if available (for local dev), otherwise use FRONTEND_URL
-    callback_base = os.getenv("FRONTEND_CALLBACK_URL", FRONTEND_URL)
+    callback_base = settings.resolved_frontend_callback_url
 
     fields: dict[str, Any] = {
         "payment_method": "BANK_TRANSFER",

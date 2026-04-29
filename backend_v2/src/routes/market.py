@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -18,6 +17,7 @@ from vnstock import Quote
 
 from src.services.fundamental_fetcher import fundamental_service
 from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service, parse_symbols_query
+from src.settings import get_settings
 from src.utils import (
     _cache_fresh,
     _parse_datetime,
@@ -29,11 +29,12 @@ from src.utils import (
 
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[3]
+settings = get_settings()
 
 # ── Market index configuration ────────────────────────────────────────
 
-MARKET_INDEX_HISTORY_TTL_SECONDS = max(int(os.getenv("VNSTOCK_MARKET_INDEX_CACHE_TTL_SECONDS", "180")), 30)
-MARKET_INDEX_LOOKBACK_DAYS = max(int(os.getenv("VNSTOCK_MARKET_INDEX_LOOKBACK_DAYS", "540")), 120)
+MARKET_INDEX_HISTORY_TTL_SECONDS = settings.vnstock_market_index_cache_ttl_seconds
+MARKET_INDEX_LOOKBACK_DAYS = settings.vnstock_market_index_lookback_days
 
 MARKET_INDEX_DEFINITIONS: dict[str, dict[str, str]] = {
     "VNINDEX": {"name": "VN-Index", "vnstock_symbol": "VNINDEX"},

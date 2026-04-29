@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pandas as pd
 
 from etl.config import EtlConfig
 from etl.logging_setup import get_logger
+from etl.transform.transform_validate import build_quality_contract_report
 
 log = get_logger(__name__)
 
@@ -19,6 +21,32 @@ def _file_checksum(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _save_gold_market_features(dataset: pd.DataFrame, cfg: EtlConfig) -> dict[str, str]:
+    """Write canonical gold-layer market features without removing legacy outputs."""
+    gold_table_dir = cfg.gold_dir / "market_features"
+    run_dir = gold_table_dir / f"run_id={cfg.run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_data_path = run_dir / "data.parquet"
+    dataset.to_parquet(run_data_path, index=False)
+
+    latest_path = gold_table_dir / "latest.parquet"
+    dataset.to_parquet(latest_path, index=False)
+
+    partition_root = gold_table_dir / "by_symbol"
+    if "symbol" in dataset.columns:
+        for symbol, frame in dataset.groupby("symbol"):
+            symbol_dir = partition_root / f"symbol={str(symbol).upper()}"
+            symbol_dir.mkdir(parents=True, exist_ok=True)
+            frame.sort_values("data_date").to_parquet(symbol_dir / "latest.parquet", index=False)
+
+    return {
+        "gold_market_features_run": str(run_data_path),
+        "gold_market_features_latest": str(latest_path),
+        "gold_market_features_by_symbol": str(partition_root),
+    }
 
 
 def save_processed_parquet(dataset: pd.DataFrame, cfg: EtlConfig) -> Path:
@@ -33,16 +61,8 @@ def save_processed_parquet(dataset: pd.DataFrame, cfg: EtlConfig) -> Path:
             symbol_dir.mkdir(parents=True, exist_ok=True)
             frame.to_parquet(symbol_dir / "latest.parquet", index=False)
 
-    missing_counts = dataset.isna().sum().sort_values(ascending=False)
-    quality_summary = {
-        "outlier_count": int(dataset["is_outlier"].fillna(False).sum()) if "is_outlier" in dataset.columns else 0,
-        "duplicate_rows": int(dataset.duplicated().sum()),
-        "columns_with_missing": int((missing_counts > 0).sum()),
-        "top_missing_columns": {
-            str(column): int(count)
-            for column, count in missing_counts[missing_counts > 0].head(10).items()
-        },
-    }
+    gold_artifacts = _save_gold_market_features(dataset, cfg)
+    quality_summary = build_quality_contract_report(dataset, expected_symbols=list(cfg.symbols))
 
     metadata = {
         "run_id": cfg.run_id,
@@ -56,6 +76,11 @@ def save_processed_parquet(dataset: pd.DataFrame, cfg: EtlConfig) -> Path:
         "schema_version": 2,
         "quality_summary": quality_summary,
         "checksum_sha256": _file_checksum(out),
+        "lake_layout_version": 1,
+        "layers": {
+            "legacy_processed": str(out),
+            **gold_artifacts,
+        },
     }
     meta_path = cfg.processed_dir / f"market_data_{cfg.run_id}.meta.json"
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -73,10 +98,15 @@ def cleanup_old_snapshots(cfg: EtlConfig, keep: int = 5) -> int:
         stem = parquet_path.with_suffix("")
         meta_path = stem.with_suffix(".meta.json")
         csv_path = stem.with_suffix(".csv")
+        run_id = parquet_path.stem.replace("market_data_", "", 1)
+        gold_run_dir = cfg.gold_dir / "market_features" / f"run_id={run_id}"
         for path in (parquet_path, meta_path, csv_path):
             if path.exists():
                 path.unlink()
                 deleted += 1
+        if gold_run_dir.exists():
+            shutil.rmtree(gold_run_dir)
+            deleted += 1
     if deleted:
         log.info("Cleaned up %d old processed snapshot files", deleted)
     return deleted

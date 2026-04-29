@@ -15,19 +15,13 @@ If REDIS_URL is not set or Redis is unreachable, get_redis() returns None
 and the app continues with in-memory caches.
 """
 import logging
-import os
 import threading
-from pathlib import Path
 
-from dotenv import load_dotenv
+from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(BASE_DIR / ".env")
-load_dotenv()
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = get_settings().redis_url
 
 _client = None
 _available: bool | None = None

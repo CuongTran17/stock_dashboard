@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
@@ -32,6 +31,7 @@ from src.services.vnstock_fetcher import (
     normalize_symbol,
     parse_symbols_query,
 )
+from src.settings import get_settings
 from src.utils import (
     _build_intraday_bars_from_ticks,
     _extract_valuation_from_ratios,
@@ -45,11 +45,12 @@ from src.utils import (
 )
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # Constants (mirror from main until fully extracted)
-INTRADAY_STALE_SECONDS = max(int(os.getenv("VNSTOCK_INTRADAY_STALE_SECONDS", "20")), 3)
-INTRADAY_REFRESH_TIMEOUT_SECONDS = max(float(os.getenv("VNSTOCK_INTRADAY_REFRESH_TIMEOUT_SECONDS", "4.0")), 1.0)
-TECHNICAL_CACHE_TTL_SECONDS = max(int(os.getenv("VNSTOCK_TECHNICAL_CACHE_TTL_SECONDS", "900")), 60)
+INTRADAY_STALE_SECONDS = settings.vnstock_intraday_stale_seconds
+INTRADAY_REFRESH_TIMEOUT_SECONDS = settings.vnstock_intraday_refresh_timeout_seconds
+TECHNICAL_CACHE_TTL_SECONDS = settings.vnstock_technical_cache_ttl_seconds
 
 router = APIRouter(tags=["Stocks"])
 

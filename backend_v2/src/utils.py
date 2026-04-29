@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -19,23 +18,6 @@ VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 # ── Environment helpers ──────────────────────────────────────────────
-
-
-def _env_flag(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
 
 
 # ── Scalar coercions ─────────────────────────────────────────────────

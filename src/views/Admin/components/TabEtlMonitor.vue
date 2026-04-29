@@ -82,7 +82,10 @@
               <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ phase.key }}</p>
               <h3 class="mt-1 text-base font-semibold text-gray-800 dark:text-white/90">{{ phase.title }}</h3>
             </div>
-            <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="phase.badgeClass">{{ phase.badge }}</span>
+            <div class="flex flex-col items-end gap-2">
+              <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="phase.badgeClass">{{ phase.badge }}</span>
+              <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ phaseDurationLabel(phase.key) }}</span>
+            </div>
           </div>
           <ul class="mt-4 space-y-3">
             <li v-for="item in phase.items" :key="item" class="flex gap-3 text-sm text-gray-600 dark:text-gray-400">
@@ -134,6 +137,11 @@
         <div class="space-y-6">
           <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-white/[0.03]">
             <h3 class="text-base font-semibold text-gray-800 dark:text-white/90">Làm sạch & chất lượng</h3>
+            <div class="mt-3 rounded-xl px-4 py-3 text-sm" :class="qualityStatusClass">
+              Contract: {{ quality.status || 'unknown' }}
+              <span v-if="quality.warnings?.length">· {{ quality.warnings.length }} cảnh báo</span>
+              <span v-if="quality.errors?.length">· {{ quality.errors.length }} lỗi</span>
+            </div>
             <div class="mt-4 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
               <div class="rounded-xl bg-gray-50 p-4 dark:bg-gray-800/60">
                 <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Outliers</p>
@@ -154,6 +162,15 @@
               <li>Fundamental merge bằng as-of backward để tránh look-ahead bias.</li>
               <li>News được gộp title/description, loại trùng, forward-fill khi cấu hình cho phép.</li>
             </ul>
+            <div v-if="quality.errors?.length || quality.warnings?.length" class="mt-4 space-y-2 text-xs">
+              <p
+                v-for="item in [...(quality.errors || []), ...(quality.warnings || [])].slice(0, 4)"
+                :key="item"
+                class="rounded-lg bg-gray-50 px-3 py-2 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              >
+                {{ item }}
+              </p>
+            </div>
           </div>
 
           <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-white/[0.03]">
@@ -197,10 +214,14 @@
                   <p v-if="Object.keys(run.errors || {}).length" class="mt-2 max-w-[240px] text-xs text-error-600 dark:text-error-300">
                     {{ Object.values(run.errors)[0] }}
                   </p>
+                  <p v-else-if="Object.keys(run.extract_errors || {}).length" class="mt-2 max-w-[240px] text-xs text-warning-600 dark:text-warning-300">
+                    Extract soft failures: {{ Object.keys(run.extract_errors || {}).length }}
+                  </p>
                 </td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                   <div>{{ formatDateTime(run.started_at) }}</div>
                   <div class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{{ formatDuration(run.duration_seconds) }}</div>
+                  <div class="mt-0.5 text-xs text-gray-400 dark:text-gray-500">{{ run.run_mode || 'full' }} · {{ run.effective_start_date || '?' }} → {{ run.effective_end_date || '?' }}</div>
                 </td>
                 <td class="px-6 py-4 text-right font-mono text-sm text-gray-700 dark:text-gray-300">{{ formatNumber(run.row_count) }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">{{ formatSymbols(run.symbols) }}</td>
@@ -280,6 +301,9 @@ const pipelinePhases = [
 const loadTargets = [
   { name: 'lake/processed/market_data_*.parquet', kind: 'Parquet', description: 'Dataset hợp nhất sau transform, dùng cho audit và batch model sau này.' },
   { name: 'lake/processed/by_symbol/*/latest.parquet', kind: 'Parquet', description: 'Snapshot mới nhất theo từng symbol, tối ưu đọc lẻ.' },
+  { name: 'lake/gold/market_features/run_id=*/data.parquet', kind: 'Gold', description: 'Canonical feature table theo run, dùng cho ML, audit và downstream batch jobs.' },
+  { name: 'lake/gold/market_features/latest.parquet', kind: 'Gold', description: 'Alias mới nhất của feature table đã validate, không phụ thuộc legacy processed path.' },
+  { name: 'lake/gold/market_features/by_symbol/symbol=*/latest.parquet', kind: 'Gold', description: 'Partition đọc nhanh theo từng mã trong layout lake chuẩn.' },
   { name: 'daily_ohlcv', kind: 'MySQL', description: 'Giá ngày đã chuẩn hóa, dùng cho chart và API lịch sử.' },
   { name: 'company_overview_cache', kind: 'MySQL', description: 'Thông tin doanh nghiệp và metadata ngành.' },
   { name: 'financial_report_cache', kind: 'MySQL', description: 'Bảng cân đối, kết quả kinh doanh, lưu chuyển tiền tệ, chỉ số tài chính.' },
@@ -292,7 +316,22 @@ const latestRunId = computed(() => status.value?.last_run_id || health.value?.la
 const latestRowCount = computed(() => status.value?.row_count || health.value?.latest_run?.row_count || latestSnapshot.value?.row_count || 0)
 const latestSymbols = computed(() => status.value?.symbols?.length ? status.value.symbols : latestSnapshot.value?.symbols || [])
 const columns = computed(() => latestSnapshot.value?.columns || [])
-const quality = computed(() => latestSnapshot.value?.quality_summary || { outlier_count: 0, duplicate_rows: 0, columns_with_missing: 0, top_missing_columns: {} })
+const quality = computed(() => (
+  health.value?.latest_run?.quality_report
+  || latestSnapshot.value?.quality_summary
+  || { status: 'unknown', outlier_count: 0, duplicate_rows: 0, columns_with_missing: 0, top_missing_columns: {} }
+))
+const latestPhaseDurations = computed(() => health.value?.latest_run?.phase_durations || {})
+
+const qualityStatusClass = computed(() => {
+  if (quality.value.status === 'passed') {
+    return 'bg-success-50 text-success-700 dark:bg-success-500/15 dark:text-success-300'
+  }
+  if (quality.value.status === 'failed') {
+    return 'bg-error-50 text-error-700 dark:bg-error-500/15 dark:text-error-300'
+  }
+  return 'bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+})
 
 const statusDotClass = computed(() => {
   const current = status.value?.status || health.value?.status
@@ -393,6 +432,10 @@ function formatDuration(seconds: number | undefined): string {
   if (!seconds) return 'N/A'
   if (seconds < 60) return `${seconds.toFixed(1)} giây`
   return `${(seconds / 60).toFixed(1)} phút`
+}
+
+function phaseDurationLabel(phase: string): string {
+  return formatDuration(latestPhaseDurations.value[phase.toLowerCase()])
 }
 
 function formatSymbols(symbols: string[]): string {

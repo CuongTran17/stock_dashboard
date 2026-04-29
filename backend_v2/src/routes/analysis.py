@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Any, Optional
 
@@ -22,11 +21,13 @@ from src.database.models import AIPrediction
 from src.routes.stocks import _ensure_history_data
 from src.services.fundamental_fetcher import fundamental_service
 from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service
+from src.settings import get_settings
 from src.utils import _extract_valuation_from_ratios, _to_float
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Analysis"])
+settings = get_settings()
 
 
 # ── Helper functions ──────────────────────────────────────────────────
@@ -116,7 +117,7 @@ async def generate_analysis(
     if symbol not in VN30_SYMBOLS:
         raise HTTPException(status_code=400, detail=f"Symbol {symbol} not in VN30 list")
 
-    kaggle_api_url = os.getenv("KAGGLE_API_URL", "").strip()
+    kaggle_api_url = settings.kaggle_api_url.strip()
     if not kaggle_api_url:
         raise HTTPException(status_code=503, detail="KAGGLE_API_URL not configured")
 

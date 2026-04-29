@@ -22,11 +22,14 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import date
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
+import pandas as pd
 from dotenv import load_dotenv
 from vnstock import change_api_key
 
@@ -45,11 +48,82 @@ from etl.extract.extract_prices import extract_index_prices, extract_symbol_pric
 from etl.load_to_mysql import load_all, load_eod_rows
 from etl.load_to_parquet import cleanup_old_snapshots, save_processed_parquet
 from etl.logging_setup import get_logger, setup_logging
-from etl.run_metadata import complete_metadata, running_metadata, save_run_metadata
+from etl.run_metadata import RunMetadata, complete_metadata, running_metadata, save_run_metadata
 from etl.transform.transform_aggregate import aggregate_all_ticks_to_eod
 from etl.transform.build_dataset import build_full_dataset, validate_dataset
 
 log = get_logger(__name__)
+
+
+def _latest_processed_parquet(cfg: EtlConfig) -> Path | None:
+    files = sorted(
+        (
+            path for path in cfg.processed_dir.glob("market_data_*.parquet")
+            if cfg.run_id not in path.name
+        ),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return files[0] if files else None
+
+
+def _resolve_incremental_cfg(cfg: EtlConfig) -> EtlConfig:
+    if cfg.run_mode != "incremental":
+        return cfg
+
+    latest = _latest_processed_parquet(cfg)
+    if latest is None:
+        log.warning("Incremental mode requested but no previous snapshot was found; falling back to configured start date.")
+        return cfg
+
+    try:
+        previous = pd.read_parquet(latest, columns=["data_date"])
+        latest_date = pd.to_datetime(previous["data_date"], errors="coerce").dropna().max()
+    except Exception as exc:
+        log.warning("Could not inspect previous snapshot %s for incremental start: %s", latest, exc)
+        return cfg
+
+    if pd.isna(latest_date):
+        return cfg
+
+    resolved_start = (latest_date.date() - pd.Timedelta(days=max(cfg.incremental_overlap_days, 0))).date()
+    if resolved_start > cfg.user_end:
+        resolved_start = cfg.user_end
+    if resolved_start != cfg.user_start:
+        log.info(
+            "Incremental start resolved from previous snapshot %s: %s -> %s",
+            latest,
+            cfg.user_start,
+            resolved_start,
+        )
+    return replace(cfg, user_start=resolved_start)
+
+
+def _merge_with_previous_snapshot(dataset: pd.DataFrame, cfg: EtlConfig) -> tuple[pd.DataFrame, Path | None]:
+    if cfg.run_mode not in {"incremental", "backfill"} or not cfg.merge_with_latest:
+        return dataset, None
+
+    latest = _latest_processed_parquet(cfg)
+    if latest is None:
+        log.info("%s mode has no previous snapshot to merge.", cfg.run_mode)
+        return dataset, None
+
+    previous = pd.read_parquet(latest)
+    combined = pd.concat([previous, dataset], ignore_index=True, sort=False)
+    if {"symbol", "data_date"}.issubset(combined.columns):
+        combined["symbol"] = combined["symbol"].astype(str).str.upper()
+        combined["data_date"] = pd.to_datetime(combined["data_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        combined = combined.dropna(subset=["symbol", "data_date"])
+        combined = combined.drop_duplicates(["symbol", "data_date"], keep="last")
+        combined = combined.sort_values(["symbol", "data_date"]).reset_index(drop=True)
+    log.info(
+        "Merged %s rows from %s with %s new rows -> %s rows",
+        len(previous),
+        latest,
+        len(dataset),
+        len(combined),
+    )
+    return combined, latest
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +215,24 @@ def _check_failure_gate(errors: dict[str, Exception], cfg: EtlConfig) -> None:
 # ---------------------------------------------------------------------------
 # Entry points
 # ---------------------------------------------------------------------------
-def _run_impl(cfg: EtlConfig) -> Path:
+def _record_phase(metadata: RunMetadata, phase: str, started_at: float) -> None:
+    metadata.phase_durations[phase] = round(time.perf_counter() - started_at, 3)
+
+
+def _symbol_status_from_extract_errors(cfg: EtlConfig, errors: dict[str, Exception]) -> dict[str, str]:
+    status = {symbol.upper(): "success" for symbol in cfg.symbols}
+    for label in errors:
+        if ":" not in label:
+            continue
+        kind, symbol = label.split(":", 1)
+        symbol = symbol.upper()
+        if symbol not in status:
+            continue
+        status[symbol] = "failed_price" if kind == "prices" else "partial_failure"
+    return status
+
+
+def _run_impl(cfg: EtlConfig, metadata: RunMetadata) -> Path:
     setup_logging(cfg.log_dir)
     cfg.raw_dir.mkdir(parents=True, exist_ok=True)
     cfg.processed_dir.mkdir(parents=True, exist_ok=True)
@@ -169,17 +260,48 @@ def _run_impl(cfg: EtlConfig) -> Path:
     )
 
     # ---- EXTRACT ----------------------------------------------------------
+    phase_started = time.perf_counter()
     errors = _extract_all(cfg)
+    _record_phase(metadata, "extract", phase_started)
+    metadata.extract_errors = {label: str(exc) for label, exc in errors.items()}
+    metadata.symbol_status = _symbol_status_from_extract_errors(cfg, errors)
+    save_run_metadata(metadata, cfg)
     _check_failure_gate(errors, cfg)
 
     # ---- TRANSFORM --------------------------------------------------------
+    phase_started = time.perf_counter()
     log.info("Transform phase starting (%d symbols)", len(cfg.symbols))
     dataset = build_full_dataset(cfg.symbols, cfg)
     if dataset.empty:
         raise RuntimeError("No rows were generated after transform. Check raw layer.")
-    validate_dataset(dataset)
+    quality_report = validate_dataset(dataset, expected_symbols=cfg.symbols)
+    _record_phase(metadata, "transform", phase_started)
+    metadata.quality_report = quality_report
+    metadata.row_counts.update(
+        {
+            "delta_rows": int(len(dataset)),
+            "delta_symbols": int(dataset["symbol"].nunique()) if "symbol" in dataset.columns else 0,
+            "processed_rows": int(len(dataset)),
+            "processed_symbols": int(dataset["symbol"].nunique()) if "symbol" in dataset.columns else 0,
+        }
+    )
+    save_run_metadata(metadata, cfg)
+
+    dataset, merged_from = _merge_with_previous_snapshot(dataset, cfg)
+    if merged_from is not None:
+        metadata.artifacts["merged_from_snapshot"] = str(merged_from)
+        quality_report = validate_dataset(dataset, expected_symbols=cfg.symbols)
+        metadata.quality_report = quality_report
+        metadata.row_counts.update(
+            {
+                "processed_rows": int(len(dataset)),
+                "processed_symbols": int(dataset["symbol"].nunique()) if "symbol" in dataset.columns else 0,
+            }
+        )
+        save_run_metadata(metadata, cfg)
 
     # ---- LOAD -------------------------------------------------------------
+    phase_started = time.perf_counter()
     cfg.output_file.parent.mkdir(parents=True, exist_ok=True)
     dataset.to_csv(
         cfg.output_file,
@@ -191,16 +313,28 @@ def _run_impl(cfg: EtlConfig) -> Path:
     # Keep root parquet for backward compatibility with older scripts.
     parquet_out = cfg.output_file.with_suffix(".parquet")
     dataset.to_parquet(parquet_out, index=False)
+    metadata.artifacts["output_csv"] = str(cfg.output_file)
+    metadata.artifacts["output_parquet"] = str(parquet_out)
 
     processed_parquet = save_processed_parquet(dataset, cfg)
+    metadata.artifacts["processed_parquet"] = str(processed_parquet)
+    metadata.artifacts["processed_metadata"] = str(cfg.processed_dir / f"market_data_{cfg.run_id}.meta.json")
+    metadata.artifacts["gold_market_features"] = str(cfg.gold_dir / "market_features" / f"run_id={cfg.run_id}" / "data.parquet")
+    metadata.artifacts["gold_market_features_latest"] = str(cfg.gold_dir / "market_features" / "latest.parquet")
 
     if cfg.enable_mysql_load:
         load_all(cfg, dataset)
+        metadata.artifacts["mysql_load"] = "enabled"
         if cfg.enable_tick_eod:
             eod_rows = aggregate_all_ticks_to_eod(cfg.symbols, cfg, source=cfg.tick_source)
             load_eod_rows(eod_rows)
+            metadata.row_counts["tick_eod_rows"] = int(len(eod_rows))
+    else:
+        metadata.artifacts["mysql_load"] = "disabled"
 
     cleanup_old_snapshots(cfg, keep=5)
+    _record_phase(metadata, "load", phase_started)
+    save_run_metadata(metadata, cfg)
 
     log.info(
         "Done: %s & .parquet rows=%d range=%s..%s symbols=%s snapshot=%s",
@@ -211,14 +345,17 @@ def _run_impl(cfg: EtlConfig) -> Path:
         ",".join(sorted(dataset["symbol"].unique().tolist())),
         processed_parquet,
     )
+    if quality_report.get("warnings"):
+        log.warning("Quality contract warnings: %s", quality_report["warnings"])
     return cfg.output_file
 
 
 def run(cfg: EtlConfig) -> Path:
+    cfg = _resolve_incremental_cfg(cfg)
     metadata = running_metadata(cfg)
     save_run_metadata(metadata, cfg)
     try:
-        output = _run_impl(cfg)
+        output = _run_impl(cfg, metadata)
         row_count = 0
         parquet_path = cfg.processed_dir / f"market_data_{cfg.run_id}.parquet"
         if parquet_path.exists():
@@ -228,6 +365,7 @@ def run(cfg: EtlConfig) -> Path:
                 row_count = int(len(pd.read_parquet(parquet_path, columns=["symbol"])))
             except Exception:
                 row_count = 0
+        metadata.row_counts["final_rows"] = row_count
         complete_metadata(metadata, status="success", row_count=row_count, output_file=str(output))
         save_run_metadata(metadata, cfg)
         return output
@@ -298,6 +436,18 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--tick-source", default="lake", choices=["lake", "redis", "auto"],
         help="Source for tick -> EOD aggregation",
     )
+    parser.add_argument(
+        "--run-mode", default="full", choices=["full", "incremental", "backfill"],
+        help="Run strategy. incremental resolves start date from the latest processed snapshot; backfill merges a specified range into the latest snapshot.",
+    )
+    parser.add_argument(
+        "--incremental-overlap-days", type=int, default=7,
+        help="Calendar days to overlap when resolving incremental start date.",
+    )
+    parser.add_argument(
+        "--no-merge-with-latest", action="store_true", default=False,
+        help="Do not merge incremental/backfill output with the latest processed snapshot.",
+    )
     return parser
 
 
@@ -327,6 +477,9 @@ def main() -> None:
         enable_mysql_load=not args.disable_mysql_load,
         enable_tick_eod=not args.disable_tick_eod,
         tick_source=args.tick_source,
+        run_mode=args.run_mode,
+        incremental_overlap_days=args.incremental_overlap_days,
+        merge_with_latest=not args.no_merge_with_latest,
     )
     run(cfg)
 

@@ -16,7 +16,6 @@ Business logic and helper functions live in:
   - src/routes/websocket.py – /api/ws/*
 """
 import logging
-import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,16 +34,17 @@ from src.routes.stocks import router as stocks_router
 from src.routes.websocket import router as websocket_router
 from src.services.fundamental_fetcher import fundamental_service
 from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service
-from src.utils import _env_flag, _env_int
+from src.settings import get_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # ── Preload configuration ─────────────────────────────────────────────
 
-PRELOAD_REFERENCE_CACHE_ENABLED = _env_flag("VNSTOCK_PRELOAD_REFERENCE_CACHE", True)
-PRELOAD_REFERENCE_FORCE_REFRESH = _env_flag("VNSTOCK_PRELOAD_FORCE_REFRESH", False)
-PRELOAD_REFERENCE_SYMBOL_LIMIT = max(1, min(len(VN30_SYMBOLS), _env_int("VNSTOCK_PRELOAD_SYMBOL_LIMIT", 5)))
+PRELOAD_REFERENCE_CACHE_ENABLED = settings.vnstock_preload_reference_cache
+PRELOAD_REFERENCE_FORCE_REFRESH = settings.vnstock_preload_force_refresh
+PRELOAD_REFERENCE_SYMBOL_LIMIT = max(1, min(len(VN30_SYMBOLS), settings.vnstock_preload_symbol_limit))
 
 # ── Lifespan ──────────────────────────────────────────────────────────
 
@@ -62,20 +62,9 @@ lifespan = build_lifespan(
 
 app = FastAPI(title="VNStock Intraday API V2", lifespan=lifespan, version="2.0.0")
 
-_frontend_url = os.getenv("FRONTEND_URL", "").rstrip("/")
-_allowed_origins = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-]
-if _frontend_url and _frontend_url not in _allowed_origins:
-    _allowed_origins.append(_frontend_url)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
+    allow_origins=settings.allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -4,13 +4,7 @@
  * Kết nối Vue frontend với FastAPI backend.
  */
 
-function normalizeBackendUrl(rawUrl?: string): string {
-  const value = (rawUrl || '').trim()
-  if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
-  if (value.startsWith(':')) return `http://127.0.0.1${value}`
-  return `http://${value}`.replace(/\/+$/, '')
-}
+import { backendFetch, normalizeBackendUrl } from './httpClient'
 
 const BACKEND_URL = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 
@@ -215,20 +209,7 @@ class StockBackendApi {
   }
 
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers || {}),
-      },
-      ...init,
-    })
-
-    if (!response.ok) {
-      const body = await response.text()
-      throw new Error(`API Error ${response.status}: ${body}`)
-    }
-
-    return response.json() as Promise<T>
+    return backendFetch<T>(this.baseUrl, path, init)
   }
 
   private buildQuery(params: Record<string, string | number | boolean | undefined>): string {

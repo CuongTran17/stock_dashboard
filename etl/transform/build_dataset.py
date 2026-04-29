@@ -43,7 +43,12 @@ from etl.transform.transform_fundamental import merge_fundamental
 from etl.transform.transform_googlenews import merge_google_news
 from etl.transform.transform_indicators import add_price_indicators
 from etl.transform.transform_news import merge_events, merge_news
-from etl.transform.transform_validate import enforce_schema, report_quality_metrics, validate_and_clean
+from etl.transform.transform_validate import (
+    enforce_quality_contract,
+    enforce_schema,
+    report_quality_metrics,
+    validate_and_clean,
+)
 
 log = get_logger(__name__)
 
@@ -294,7 +299,7 @@ def build_full_dataset(symbols: Iterable[str], cfg: EtlConfig) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Data quality gate
 # ---------------------------------------------------------------------------
-def validate_dataset(df: pd.DataFrame) -> None:
+def validate_dataset(df: pd.DataFrame, expected_symbols: Iterable[str] | None = None) -> dict[str, object]:
     if df.empty:
         raise RuntimeError("Processed dataset is empty")
 
@@ -302,9 +307,16 @@ def validate_dataset(df: pd.DataFrame) -> None:
     if missing:
         raise RuntimeError(f"Missing columns: {missing}")
 
+    quality_report = enforce_quality_contract(
+        df,
+        expected_symbols=[str(symbol).upper() for symbol in expected_symbols] if expected_symbols else None,
+    )
+
     # Mỗi mã phải có >= 80% số phiên so với mã có nhiều phiên nhất
     per_symbol = df.groupby("symbol")["data_date"].nunique()
     threshold = per_symbol.max() * 0.8
     thin = per_symbol[per_symbol < threshold]
     if not thin.empty:
         log.warning("Thin symbols (<80%% sessions): %s", thin.to_dict())
+
+    return quality_report

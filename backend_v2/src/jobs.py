@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,11 +27,13 @@ def build_lifespan(
     preload_reference_symbol_limit: int,
 ) -> Callable[[Any], Any]:
     scheduler = AsyncIOScheduler(timezone="Asia/Ho_Chi_Minh")
+    from src.settings import get_settings
+
+    settings = get_settings()
 
     def _etl_symbols() -> list[str]:
-        raw = os.getenv("ETL_SYMBOLS", "")
-        if raw.strip():
-            return [item.strip().upper() for item in raw.replace(";", ",").split(",") if item.strip()]
+        if settings.etl_symbol_list:
+            return settings.etl_symbol_list
         return list(vn30_symbols)
 
     def _etl_cfg_factory():
@@ -42,15 +43,17 @@ def build_lifespan(
 
         today = date.today()
         return EtlConfig.from_args(
-            start_date=today - timedelta(days=int(os.getenv("ETL_LOOKBACK_DAYS", "365"))),
+            start_date=today - timedelta(days=settings.etl_lookback_days),
             end_date=today,
             symbols=_etl_symbols(),
             enable_mysql_load=True,
-            tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+            tick_source=settings.etl_tick_source,
+            run_mode=settings.etl_run_mode,
+            incremental_overlap_days=settings.etl_incremental_overlap_days,
         )
 
     async def _warmup_caches() -> None:
-        scope = os.getenv("ETL_CACHE_WARMUP_SCOPE", "etl").lower()
+        scope = settings.etl_cache_warmup_scope.lower()
         symbols = vn30_symbols if scope == "vn30" else _etl_symbols()
         logger.info("Starting ETL cache warmup scope=%s symbols=%d", scope, len(symbols))
         await fundamental_service.preload_reference_caches(symbols, force_refresh=True)
@@ -79,7 +82,7 @@ def build_lifespan(
                 name="vn30-reference-preload",
             )
 
-        legacy_eod_enabled = os.getenv("VN30_EOD_JOB_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+        legacy_eod_enabled = settings.vn30_eod_job_enabled
         if legacy_eod_enabled and not scheduler.get_job("vn30-eod-job"):
             scheduler.add_job(
                 lambda: fetcher_service.aggregate_today_intraday_to_daily(),

@@ -5,7 +5,7 @@
     <div class="flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Dividend</h3>
 
-      <div class="relative h-fit">
+      <div v-if="menuItems.length > 0" class="relative h-fit">
         <DropdownMenu :menu-items="menuItems">
           <template #icon>
             <svg
@@ -36,8 +36,5 @@
 <script setup lang="ts">
 import DropdownMenu from '@/components/common/DropdownMenu.vue'
 
-const menuItems = [
-  { label: 'Xem chi tiết', onClick: () => console.log('View detail') },
-  { label: 'Xuất báo cáo', onClick: () => console.log('Export') },
-]
+const menuItems: { label: string; onClick: () => void }[] = []
 </script>

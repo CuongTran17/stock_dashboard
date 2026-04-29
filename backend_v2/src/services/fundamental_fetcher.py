@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Optional
 
@@ -15,8 +14,10 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from src.database.db import AsyncSessionLocal
 from src.database.models import CompanyOverviewCache, EventsCache, FinancialReportCache, NewsCache
 from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service, is_vn30_symbol, normalize_symbol
+from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class NewsRowModel(BaseModel):
@@ -63,14 +64,14 @@ class FundamentalFetcherService:
         max_financial_rows: Optional[int] = None,
     ) -> None:
         self._session_factory = session_factory
-        self.company_source = company_source or os.getenv("VNSTOCK_COMPANY_SOURCE", "vci")
-        self.news_cache_ttl_seconds = max(news_cache_ttl_seconds or int(os.getenv("VNSTOCK_NEWS_CACHE_TTL_SECONDS", "300")), 60)
-        self.events_cache_ttl_seconds = max(events_cache_ttl_seconds or int(os.getenv("VNSTOCK_EVENTS_CACHE_TTL_SECONDS", "900")), 120)
-        self.overview_cache_ttl_seconds = max(overview_cache_ttl_seconds or int(os.getenv("VNSTOCK_OVERVIEW_CACHE_TTL_SECONDS", "21600")), 300)
-        self.financial_cache_ttl_seconds = max(financial_cache_ttl_seconds or int(os.getenv("VNSTOCK_FINANCIAL_CACHE_TTL_SECONDS", "21600")), 300)
-        self.max_news_per_symbol = max(max_news_per_symbol or int(os.getenv("VNSTOCK_NEWS_PER_SYMBOL", "20")), 5)
-        self.max_events_per_symbol = max(max_events_per_symbol or int(os.getenv("VNSTOCK_EVENTS_PER_SYMBOL", "12")), 5)
-        self.max_financial_rows = max(max_financial_rows or int(os.getenv("VNSTOCK_FINANCIAL_MAX_ROWS", "120")), 10)
+        self.company_source = company_source or settings.vnstock_company_source
+        self.news_cache_ttl_seconds = news_cache_ttl_seconds or settings.vnstock_news_cache_ttl_seconds
+        self.events_cache_ttl_seconds = events_cache_ttl_seconds or settings.vnstock_events_cache_ttl_seconds
+        self.overview_cache_ttl_seconds = overview_cache_ttl_seconds or settings.vnstock_overview_cache_ttl_seconds
+        self.financial_cache_ttl_seconds = financial_cache_ttl_seconds or settings.vnstock_financial_cache_ttl_seconds
+        self.max_news_per_symbol = max_news_per_symbol or settings.vnstock_news_per_symbol
+        self.max_events_per_symbol = max_events_per_symbol or settings.vnstock_events_per_symbol
+        self.max_financial_rows = max_financial_rows or settings.vnstock_financial_max_rows
 
         self.financial_methods: dict[str, str] = {
             "income": "income_statement",

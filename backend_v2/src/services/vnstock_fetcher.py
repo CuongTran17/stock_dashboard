@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -17,8 +16,10 @@ from src.database.models import DailyOHLCV
 from src.database.redis_db import get_redis
 from src.services.vnstock_error_utils import extract_retry_after_seconds, is_rate_limit_error
 from src.services.vnstock_rate_limiter import vnstock_rate_limiter
+from src.settings import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # VN30 Basket
 VN30_SYMBOLS = [
@@ -29,16 +30,16 @@ VN30_SYMBOLS = [
 VN30_SYMBOL_SET = {symbol.upper() for symbol in VN30_SYMBOLS}
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
-QUOTE_SOURCE = os.getenv("VNSTOCK_QUOTE_SOURCE", "vci").lower()
-INTRADAY_PAGE_SIZE = max(int(os.getenv("VNSTOCK_INTRADAY_PAGE_SIZE", "50")), 1)
-MAX_TICKS_PER_SYMBOL = max(int(os.getenv("VNSTOCK_MAX_TICKS_PER_SYMBOL", "1200")), 100)
-DEFAULT_HISTORY_LOOKBACK_DAYS = max(int(os.getenv("VNSTOCK_HISTORY_LOOKBACK_DAYS", "365")), 30)
-MIN_REQUEST_INTERVAL_SECONDS = max(float(os.getenv("VNSTOCK_MIN_REQUEST_INTERVAL_SECONDS", "1.05")), 0.6)
-OUT_OF_SESSION_POLL_SECONDS = max(int(os.getenv("VNSTOCK_OUT_OF_SESSION_POLL_SECONDS", "60")), 15)
-INTRADAY_CONCURRENCY = max(int(os.getenv("VNSTOCK_INTRADAY_CONCURRENCY", "4")), 1)
-HISTORY_PRELOAD_CONCURRENCY = max(int(os.getenv("VNSTOCK_HISTORY_PRELOAD_CONCURRENCY", "1")), 1)
-HISTORY_PRELOAD_SYMBOL_LIMIT = max(int(os.getenv("VNSTOCK_HISTORY_PRELOAD_SYMBOL_LIMIT", "5")), 1)
-FETCH_RETRY_ATTEMPTS = max(int(os.getenv("VNSTOCK_FETCH_RETRY_ATTEMPTS", "3")), 1)
+QUOTE_SOURCE = settings.vnstock_quote_source.lower()
+INTRADAY_PAGE_SIZE = settings.vnstock_intraday_page_size
+MAX_TICKS_PER_SYMBOL = settings.vnstock_max_ticks_per_symbol
+DEFAULT_HISTORY_LOOKBACK_DAYS = settings.vnstock_history_lookback_days
+MIN_REQUEST_INTERVAL_SECONDS = settings.vnstock_min_request_interval_seconds
+OUT_OF_SESSION_POLL_SECONDS = settings.vnstock_out_of_session_poll_seconds
+INTRADAY_CONCURRENCY = settings.vnstock_intraday_concurrency
+HISTORY_PRELOAD_CONCURRENCY = settings.vnstock_history_preload_concurrency
+HISTORY_PRELOAD_SYMBOL_LIMIT = settings.vnstock_history_preload_symbol_limit
+FETCH_RETRY_ATTEMPTS = settings.vnstock_fetch_retry_attempts
 
 TRADING_MORNING_START = dt_time(hour=9, minute=0)
 TRADING_MORNING_END = dt_time(hour=11, minute=30)
@@ -169,7 +170,7 @@ class VnstockFetcherService:
         self._configure_api_key()
 
     def _configure_api_key(self) -> None:
-        api_key = os.getenv("VNSTOCK_API_KEY") or os.getenv("VNAI_API_KEY")
+        api_key = settings.vnstock_api_key or settings.vnai_api_key
         if not api_key:
             logger.warning("VNSTOCK_API_KEY is not set. Using anonymous/community access.")
             return

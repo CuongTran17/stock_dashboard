@@ -16,15 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from src.settings import get_settings
+
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
-TICK_INTERVAL_SECONDS = float(os.getenv("MOCK_TICK_INTERVAL_SECONDS", "5"))
+TICK_INTERVAL_SECONDS = settings.mock_tick_interval_seconds
 
 # Giá tham chiếu cứng (nghìn VND) — dùng khi DB chưa có dữ liệu.
 _FALLBACK_PRICES: dict[str, float] = {
@@ -103,8 +105,7 @@ async def run_mock_streamer(fetcher_service) -> None:
     Để bật: set ENABLE_MOCK_INTRADAY=true trong .env.
     Để tắt hoàn toàn: bỏ biến env (mặc định tắt).
     """
-    enabled = os.getenv("ENABLE_MOCK_INTRADAY", "false").lower() in ("1", "true", "yes")
-    if not enabled:
+    if not settings.enable_mock_intraday:
         logger.info("Mock intraday streamer disabled (ENABLE_MOCK_INTRADAY not set).")
         return
 

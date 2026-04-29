@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +12,7 @@ from pydantic import BaseModel
 
 from src.api.auth import require_role
 from src.database.models import User
+from src.settings import get_settings
 from src.services.vnstock_fetcher import VN30_SYMBOLS
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/etl", tags=["ETL"])
 _require_admin = require_role("admin")
 _last_trigger_at: datetime | None = None
 _trigger_lock = asyncio.Lock()
+settings = get_settings()
 
 
 class TriggerRequest(BaseModel):
@@ -39,15 +40,17 @@ class TriggerRequest(BaseModel):
 
 def _default_cfg(symbols: list[str] | None = None) -> EtlConfig:
     today = date.today()
-    selected = symbols or [item.strip().upper() for item in os.getenv("ETL_SYMBOLS", "").split(",") if item.strip()]
+    selected = symbols or settings.etl_symbol_list
     if not selected:
         selected = list(DEFAULT_SYMBOLS or VN30_SYMBOLS)
     return EtlConfig.from_args(
-        start_date=today - timedelta(days=int(os.getenv("ETL_LOOKBACK_DAYS", "365"))),
+        start_date=today - timedelta(days=settings.etl_lookback_days),
         end_date=today,
         symbols=selected,
         enable_mysql_load=True,
-        tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+        tick_source=settings.etl_tick_source,
+        run_mode=settings.etl_run_mode,
+        incremental_overlap_days=settings.etl_incremental_overlap_days,
     )
 
 
@@ -100,7 +103,8 @@ async def trigger_etl_run(
             symbols=symbols or cfg.symbols,
             enable_mysql_load=not body.disable_mysql_load,
             enable_tick_eod=not body.disable_tick_eod,
-            tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+            tick_source=settings.etl_tick_source,
+            run_mode="backfill",
         )
     else:
         cfg = EtlConfig.from_args(
@@ -109,7 +113,9 @@ async def trigger_etl_run(
             symbols=symbols or cfg.symbols,
             enable_mysql_load=not body.disable_mysql_load,
             enable_tick_eod=not body.disable_tick_eod,
-            tick_source=os.getenv("ETL_TICK_SOURCE", "lake"),
+            tick_source=settings.etl_tick_source,
+            run_mode=settings.etl_run_mode,
+            incremental_overlap_days=settings.etl_incremental_overlap_days,
         )
 
     async def _run_background() -> None:

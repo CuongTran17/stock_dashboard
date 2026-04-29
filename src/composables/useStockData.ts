@@ -7,7 +7,7 @@
  * 3) Persistent backend cache fallback
  */
 
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { dnseApi, type StockQuote, type OHLCVData } from '@/services/dnseApi'
 import { dnseWebSocket, type RealtimeQuote } from '@/services/dnseWebSocket'
 import {
@@ -36,6 +36,7 @@ const pollingMsFromEnv = Number(import.meta.env.VITE_BACKEND_POLLING_MS || DEFAU
 const BACKEND_POLLING_MS = Number.isFinite(pollingMsFromEnv) && pollingMsFromEnv >= 5000
   ? pollingMsFromEnv
   : DEFAULT_POLLING_MS
+const WATCHLIST_STORAGE_KEY = 'stockai_watchlist'
 
 export interface StockState {
   symbol: string
@@ -152,9 +153,30 @@ function snapshotToState(snapshot: StockSnapshot): StockState {
   }
 }
 
-export function useStockData() {
+function normalizeSymbols(symbols: string[]): string[] {
+  return [...new Set(
+    symbols
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter((symbol) => /^[A-Z0-9]{2,10}$/.test(symbol)),
+  )]
+}
+
+function loadSavedWatchlist(): string[] {
+  try {
+    const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY)
+    if (!raw) return [...DEFAULT_WATCHLIST]
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return [...DEFAULT_WATCHLIST]
+    const symbols = normalizeSymbols(parsed)
+    return symbols.length > 0 ? symbols : [...DEFAULT_WATCHLIST]
+  } catch {
+    return [...DEFAULT_WATCHLIST]
+  }
+}
+
+function createStockDataStore() {
   const stocks = reactive<Record<string, StockState>>({})
-  const watchlist = ref<string[]>([...DEFAULT_WATCHLIST])
+  const watchlist = ref<string[]>(loadSavedWatchlist())
   const featuredSymbols = ref<string[]>([...FEATURED_STOCKS])
   const isConnected = ref(false)
   const isLoading = ref(false)
@@ -176,6 +198,28 @@ export function useStockData() {
   const watchlistStocks = computed(() =>
     watchlist.value.map((symbol) => stocks[symbol]).filter(Boolean),
   )
+
+  const allRequestedSymbols = computed(() =>
+    normalizeSymbols([...featuredSymbols.value, ...watchlist.value]),
+  )
+
+  const hasUsableData = computed(() =>
+    Object.values(stocks).some((stock) => stock.price > 0),
+  )
+
+  const connectionMode = computed<'realtime' | 'polling' | 'offline'>(() => {
+    if (isConnected.value) return 'realtime'
+    if (backendAvailable.value) return 'polling'
+    return 'offline'
+  })
+
+  watch(watchlist, (symbols) => {
+    try {
+      window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(symbols))
+    } catch {
+      // Ignore storage failures; the in-memory watchlist remains usable.
+    }
+  }, { deep: true })
 
   async function checkBackendAvailability(): Promise<boolean> {
     try {
@@ -338,7 +382,7 @@ export function useStockData() {
     isLoading.value = true
     error.value = null
 
-    const allSymbols = [...new Set([...featuredSymbols.value, ...watchlist.value])]
+    const allSymbols = allRequestedSymbols.value
 
     try {
       await checkBackendAvailability()
@@ -391,7 +435,7 @@ export function useStockData() {
 
     dnseWebSocket.connect(token)
 
-    const allSymbols = [...new Set([...featuredSymbols.value, ...watchlist.value])]
+    const allSymbols = allRequestedSymbols.value
     unsubscribeWs?.()
     unsubscribeWs = dnseWebSocket.subscribeMultiple(allSymbols, (quote: RealtimeQuote) => {
       updateFromRealtime(quote)
@@ -443,7 +487,7 @@ export function useStockData() {
 
     pollingTimer = setInterval(async () => {
       try {
-        const allSymbols = [...new Set([...featuredSymbols.value, ...watchlist.value])]
+        const allSymbols = allRequestedSymbols.value
 
         if (backendAvailable.value) {
           await loadFromBackend(allSymbols)
@@ -522,9 +566,9 @@ export function useStockData() {
   }
 
   function addToWatchlist(symbol: string): void {
-    const upperSymbol = symbol.toUpperCase()
+    const upperSymbol = symbol.trim().toUpperCase()
 
-    if (!watchlist.value.includes(upperSymbol)) {
+    if (/^[A-Z0-9]{2,10}$/.test(upperSymbol) && !watchlist.value.includes(upperSymbol)) {
       watchlist.value.push(upperSymbol)
       void loadSymbolData(upperSymbol)
     }
@@ -633,6 +677,8 @@ export function useStockData() {
     lastRefresh,
     lastDataSyncAt,
     backendAvailable,
+    connectionMode,
+    hasUsableData,
 
     featuredStocks,
     watchlistStocks,
@@ -647,4 +693,10 @@ export function useStockData() {
     getTechnicalAnalysis,
     cleanup,
   }
+}
+
+const stockDataStore = createStockDataStore()
+
+export function useStockData() {
+  return stockDataStore
 }

@@ -30,7 +30,7 @@
     <!-- Watchlist items -->
     <div class="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar">
       <div
-        v-for="stock in stocks"
+        v-for="stock in sortedStocks"
         :key="stock.symbol"
         class="flex items-center justify-between p-3 rounded-xl transition-colors hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer"
         @click="$emit('select', stock.symbol)"
@@ -107,11 +107,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import DropdownMenu from '@/components/common/DropdownMenu.vue'
 import type { StockState } from '@/composables/useStockData'
 
-defineProps<{
+const props = defineProps<{
   stocks: StockState[]
 }>()
 
@@ -122,11 +122,23 @@ const emit = defineEmits<{
 }>()
 
 const menuItems = [
-  { label: 'Sắp xếp theo giá', onClick: () => console.log('Sắp xếp theo giá') },
-  { label: 'Sắp xếp theo % thay đổi', onClick: () => console.log('Sắp xếp theo thay đổi') },
+  { label: 'Sắp xếp theo giá', onClick: () => { sortMode.value = 'price' } },
+  { label: 'Sắp xếp theo % thay đổi', onClick: () => { sortMode.value = 'changePercent' } },
 ]
 
 const newSymbol = ref('')
+const sortMode = ref<'default' | 'price' | 'changePercent'>('default')
+
+const sortedStocks = computed(() => {
+  const items = [...props.stocks]
+  if (sortMode.value === 'price') {
+    return items.sort((a, b) => b.price - a.price)
+  }
+  if (sortMode.value === 'changePercent') {
+    return items.sort((a, b) => b.changePercent - a.changePercent)
+  }
+  return items
+})
 
 function addSymbol() {
   const symbol = newSymbol.value.trim().toUpperCase()

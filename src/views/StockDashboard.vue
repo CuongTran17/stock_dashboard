@@ -14,21 +14,50 @@
             Dữ liệu cập nhật lần cuối: {{ formattedLastDataSync }}
           </p>
         </div>
-        <ConnectionStatus :connected="isConnected" :last-update="lastRefresh" />
+        <div class="flex items-center gap-3">
+          <ConnectionStatus
+            :connected="isConnected"
+            :backend-available="backendAvailable"
+            :last-update="lastRefresh"
+          />
+          <button
+            class="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-white/5"
+            :disabled="isDashboardRefreshing"
+            @click="refreshDashboard"
+          >
+            {{ isDashboardRefreshing ? 'Đang tải' : 'Làm mới' }}
+          </button>
+        </div>
       </div>
 
       <div
         v-if="isLoading"
         class="col-span-12 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700 dark:border-brand-800 dark:bg-brand-500/10 dark:text-brand-300"
       >
-        Loading latest market data...
+        Đang tải dữ liệu thị trường mới nhất...
       </div>
 
       <div
         v-if="error"
         class="col-span-12 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-500/10 dark:text-warning-300"
       >
-        {{ error }}
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span>{{ error }}</span>
+          <button
+            class="w-fit rounded-lg border border-warning-300 px-3 py-1.5 text-xs font-semibold text-warning-700 transition-colors hover:bg-warning-100 dark:border-warning-700 dark:text-warning-300 dark:hover:bg-warning-500/20"
+            :disabled="isDashboardRefreshing"
+            @click="refreshDashboard"
+          >
+            Thử lại
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="dashboardDataError"
+        class="col-span-12 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-800 dark:bg-error-500/10 dark:text-error-300"
+      >
+        {{ dashboardDataError }}
       </div>
 
       <!-- Top Gainers / Top Losers -->
@@ -61,12 +90,28 @@
           </div>
         </div>
 
-        <div v-if="snapshotsLoading" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-          Đang tải dữ liệu...
+        <div v-if="snapshotsLoading" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div
+            v-for="item in 8"
+            :key="item"
+            class="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 dark:border-gray-800 dark:bg-white/[0.03]"
+          >
+            <div class="flex items-center gap-3">
+              <div class="h-12 w-12 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-700"></div>
+              <div>
+                <div class="h-4 w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+                <div class="mt-2 h-3 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="ml-auto h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+              <div class="ml-auto mt-2 h-3 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+            </div>
+          </div>
         </div>
 
         <div v-else-if="displayedStocks.length === 0" class="py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-          Không có dữ liệu.
+          Không có dữ liệu. Hãy thử làm mới lại sau.
         </div>
 
         <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -116,8 +161,16 @@
             <p class="text-xs text-gray-500 dark:text-gray-400">Nhấn để xem chi tiết</p>
           </div>
 
-          <div v-if="dashboardIndicesLoading" class="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
-            Đang tải VNINDEX và VN30...
+          <div v-if="dashboardIndicesLoading" class="space-y-3">
+            <div
+              v-for="item in 2"
+              :key="item"
+              class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/40"
+            >
+              <div class="h-3 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+              <div class="mt-3 h-7 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+              <div class="mt-3 h-4 w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+            </div>
           </div>
 
           <div v-else class="space-y-3">
@@ -189,6 +242,7 @@ const {
   error,
   lastRefresh,
   lastDataSyncAt,
+  backendAvailable,
   fetchInitialData,
   connectRealtime,
   startPolling,
@@ -206,6 +260,7 @@ type FilterTab = 'gainers' | 'losers'
 const snapshots = ref<StockSnapshot[]>([])
 const snapshotsLoading = ref(false)
 const activeTab = ref<FilterTab>('gainers')
+const dashboardDataError = ref<string | null>(null)
 
 const topGainers = computed(() =>
   [...snapshots.value]
@@ -232,6 +287,7 @@ async function loadSnapshots(): Promise<void> {
     snapshots.value = res.data
   } catch {
     snapshots.value = []
+    dashboardDataError.value = 'Không tải được nhóm cổ phiếu tăng/giảm từ backend.'
   } finally {
     snapshotsLoading.value = false
   }
@@ -254,9 +310,22 @@ async function loadDashboardIndices(): Promise<void> {
     dashboardIndices.value = response.data
   } catch {
     dashboardIndices.value = []
+    dashboardDataError.value = dashboardDataError.value
+      ? `${dashboardDataError.value} Không tải được chỉ số nhanh.`
+      : 'Không tải được chỉ số nhanh từ backend.'
   } finally {
     dashboardIndicesLoading.value = false
   }
+}
+
+const isDashboardRefreshing = computed(() =>
+  isLoading.value || snapshotsLoading.value || dashboardIndicesLoading.value,
+)
+
+async function refreshDashboard(): Promise<void> {
+  dashboardDataError.value = null
+  await fetchInitialData()
+  await Promise.all([loadSnapshots(), loadDashboardIndices()])
 }
 
 function goToMarketOverview(symbol: string): void {
@@ -327,8 +396,7 @@ const formattedLastDataSync = computed(() => {
 
 onMounted(async () => {
   // 1. Tải dữ liệu ban đầu từ REST API
-  await fetchInitialData()
-  void Promise.all([loadSnapshots(), loadDashboardIndices()])
+  await refreshDashboard()
 
   // 2. Kết nối WebSocket cho real-time
   try {

@@ -21,6 +21,15 @@ class RunMetadata:
     errors: dict[str, str] = field(default_factory=dict)
     duration_seconds: float = 0.0
     output_file: str | None = None
+    phase_durations: dict[str, float] = field(default_factory=dict)
+    row_counts: dict[str, int] = field(default_factory=dict)
+    extract_errors: dict[str, str] = field(default_factory=dict)
+    symbol_status: dict[str, str] = field(default_factory=dict)
+    quality_report: dict[str, Any] = field(default_factory=dict)
+    artifacts: dict[str, str] = field(default_factory=dict)
+    run_mode: str = "full"
+    effective_start_date: str | None = None
+    effective_end_date: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -54,6 +63,15 @@ def load_run_metadata(path: Path) -> RunMetadata | None:
             errors=dict(raw.get("errors") or {}),
             duration_seconds=float(raw.get("duration_seconds") or 0.0),
             output_file=raw.get("output_file"),
+            phase_durations={str(k): float(v) for k, v in dict(raw.get("phase_durations") or {}).items()},
+            row_counts={str(k): int(v) for k, v in dict(raw.get("row_counts") or {}).items()},
+            extract_errors={str(k): str(v) for k, v in dict(raw.get("extract_errors") or {}).items()},
+            symbol_status={str(k): str(v) for k, v in dict(raw.get("symbol_status") or {}).items()},
+            quality_report=dict(raw.get("quality_report") or {}),
+            artifacts={str(k): str(v) for k, v in dict(raw.get("artifacts") or {}).items()},
+            run_mode=str(raw.get("run_mode") or "full"),
+            effective_start_date=raw.get("effective_start_date"),
+            effective_end_date=raw.get("effective_end_date"),
         )
     except Exception:
         return None
@@ -73,6 +91,9 @@ def running_metadata(cfg: EtlConfig) -> RunMetadata:
         run_id=cfg.run_id,
         started_at=datetime.now(timezone.utc),
         symbols=list(cfg.symbols),
+        run_mode=cfg.run_mode,
+        effective_start_date=str(cfg.user_start),
+        effective_end_date=str(cfg.user_end),
     )
 
 
@@ -83,6 +104,12 @@ def complete_metadata(
     row_count: int = 0,
     output_file: str | None = None,
     errors: dict[str, str] | None = None,
+    phase_durations: dict[str, float] | None = None,
+    row_counts: dict[str, int] | None = None,
+    extract_errors: dict[str, str] | None = None,
+    symbol_status: dict[str, str] | None = None,
+    quality_report: dict[str, Any] | None = None,
+    artifacts: dict[str, str] | None = None,
 ) -> RunMetadata:
     completed = datetime.now(timezone.utc)
     metadata.completed_at = completed
@@ -90,5 +117,17 @@ def complete_metadata(
     metadata.row_count = row_count
     metadata.output_file = output_file
     metadata.errors = errors or {}
+    if phase_durations is not None:
+        metadata.phase_durations = phase_durations
+    if row_counts is not None:
+        metadata.row_counts = row_counts
+    if extract_errors is not None:
+        metadata.extract_errors = extract_errors
+    if symbol_status is not None:
+        metadata.symbol_status = symbol_status
+    if quality_report is not None:
+        metadata.quality_report = quality_report
+    if artifacts is not None:
+        metadata.artifacts = artifacts
     metadata.duration_seconds = (completed - metadata.started_at).total_seconds()
     return metadata
