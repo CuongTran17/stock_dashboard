@@ -1,8 +1,8 @@
 """
-Stock routes – /api/stocks/* and /api/health
+Stock routes – /api/stocks/*
 
-Covers: health check, list, snapshots, overview, history, intraday, ticks,
-technical indicators, and financial reports.
+Covers: list, snapshots, overview, history, intraday, ticks, technical
+indicators, and financial reports.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from typing import Any, Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import text
 
 from src.cache import (
     _load_financial_report_cache,
@@ -21,7 +20,6 @@ from src.cache import (
     _load_technical_cache,
     _save_technical_cache,
 )
-from src.database.db import AsyncSessionLocal
 from src.database.models import CompanyOverviewCache
 from src.services.fundamental_fetcher import fundamental_service
 from src.services.vnstock_fetcher import (
@@ -31,6 +29,7 @@ from src.services.vnstock_fetcher import (
     normalize_symbol,
     parse_symbols_query,
 )
+from src.services.technical_indicators import build_technical_payload
 from src.settings import get_settings
 from src.utils import (
     _build_intraday_bars_from_ticks,
@@ -39,7 +38,6 @@ from src.utils import (
     _row_is_fresh,
     _row_iso_timestamp,
     _to_float,
-    _to_float_series,
     _to_number_or_none,
     _utc_now,
 )
@@ -139,166 +137,19 @@ async def _ensure_history_data(
 
 def _calculate_technical_payload(symbol: str, history: list[dict[str, Any]]) -> dict[str, Any]:
     frame = pd.DataFrame(history)
-    if frame.empty:
-        return {
-            "symbol": symbol,
-            "count": 0,
-            "ohlcv": {"time": [], "open": [], "high": [], "low": [], "close": [], "volume": []},
-            "indicators": {
-                "sma_20": [], "sma_50": [], "sma_200": [],
-                "ema_12": [], "ema_26": [], "rsi_14": [],
-                "macd_line": [], "macd_signal": [], "macd_histogram": [],
-                "bb_upper": [], "bb_middle": [], "bb_lower": [],
-                "stoch_k": [], "stoch_d": [], "atr_14": [], "obv": [],
-            },
-            "signals": {
-                "rsi": "neutral",
-                "macd": "bearish",
-                "golden_cross": False,
-                "price_vs_sma200": "below",
-                "summary": "neutral",
-            },
-        }
-
-    time_values = frame["time"].astype(str).tolist()
-    close = pd.to_numeric(frame["close"], errors="coerce").fillna(0.0)
-    high = pd.to_numeric(frame["high"], errors="coerce").fillna(0.0)
-    low = pd.to_numeric(frame["low"], errors="coerce").fillna(0.0)
-    volume = pd.to_numeric(frame["volume"], errors="coerce").fillna(0.0)
-
-    sma_20 = close.rolling(window=20, min_periods=1).mean()
-    sma_50 = close.rolling(window=50, min_periods=1).mean()
-    sma_200 = close.rolling(window=200, min_periods=1).mean()
-
-    ema_12 = close.ewm(span=12, adjust=False, min_periods=1).mean()
-    ema_26 = close.ewm(span=26, adjust=False, min_periods=1).mean()
-
-    delta = close.diff().fillna(0.0)
-    gains = delta.clip(lower=0)
-    losses = (-delta).clip(lower=0)
-    avg_gain = gains.rolling(window=14, min_periods=14).mean()
-    avg_loss = losses.rolling(window=14, min_periods=14).mean().replace(0, pd.NA)
-    rs = avg_gain / avg_loss
-    rsi = (100 - (100 / (1 + rs))).fillna(50.0)
-
-    macd_line = ema_12 - ema_26
-    macd_signal = macd_line.ewm(span=9, adjust=False, min_periods=1).mean()
-    macd_histogram = macd_line - macd_signal
-
-    bb_middle = sma_20
-    bb_std = close.rolling(window=20, min_periods=1).std().fillna(0.0)
-    bb_upper = bb_middle + 2 * bb_std
-    bb_lower = bb_middle - 2 * bb_std
-
-    lowest_low = low.rolling(window=14, min_periods=1).min()
-    highest_high = high.rolling(window=14, min_periods=1).max()
-    stoch_range = (highest_high - lowest_low).replace(0, pd.NA)
-    stoch_k = (((close - lowest_low) / stoch_range) * 100).fillna(50.0)
-    stoch_d = stoch_k.rolling(window=3, min_periods=1).mean()
-
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    atr_14 = tr.rolling(window=14, min_periods=1).mean().fillna(0.0)
-
-    direction = pd.Series(0, index=close.index, dtype=float)
-    direction[close > close.shift(1)] = 1.0
-    direction[close < close.shift(1)] = -1.0
-    obv = (direction * volume).cumsum()
-    obv.iloc[0] = 0.0
-
-    latest_rsi = _to_float(rsi.iloc[-1], fallback=50.0)
-    rsi_signal = "oversold" if latest_rsi < 30 else "overbought" if latest_rsi > 70 else "neutral"
-
-    latest_macd = _to_float(macd_line.iloc[-1])
-    latest_macd_signal = _to_float(macd_signal.iloc[-1])
-    macd_bias = "bullish" if latest_macd >= latest_macd_signal else "bearish"
-
-    latest_close = _to_float(close.iloc[-1])
-    latest_sma200 = _to_float(sma_200.iloc[-1], fallback=latest_close)
-    price_vs_sma200 = "above" if latest_close >= latest_sma200 else "below"
-
-    previous_cross_state = False
-    if len(sma_50) > 1 and len(sma_200) > 1:
-        previous_cross_state = _to_float(sma_50.iloc[-2]) >= _to_float(sma_200.iloc[-2])
-    current_cross_state = _to_float(sma_50.iloc[-1]) >= _to_float(sma_200.iloc[-1])
-    golden_cross = current_cross_state and not previous_cross_state
-
-    score = 0
-    if rsi_signal == "oversold":
-        score += 1
-    elif rsi_signal == "overbought":
-        score -= 1
-    score += 1 if macd_bias == "bullish" else -1
-    score += 1 if price_vs_sma200 == "above" else -1
-    if golden_cross:
-        score += 1
-
-    if score >= 3:
-        summary = "strong_buy"
-    elif score == 2:
-        summary = "buy"
-    elif score <= -3:
-        summary = "strong_sell"
-    elif score <= -2:
-        summary = "sell"
-    else:
-        summary = "neutral"
-
-    return {
-        "symbol": symbol,
-        "count": len(frame),
-        "ohlcv": {
-            "time": time_values,
-            "open": _to_float_series(frame["open"]),
-            "high": _to_float_series(frame["high"]),
-            "low": _to_float_series(frame["low"]),
-            "close": _to_float_series(frame["close"]),
-            "volume": _to_float_series(frame["volume"]),
-        },
-        "indicators": {
-            "sma_20": _to_float_series(sma_20),
-            "sma_50": _to_float_series(sma_50),
-            "sma_200": _to_float_series(sma_200),
-            "ema_12": _to_float_series(ema_12),
-            "ema_26": _to_float_series(ema_26),
-            "rsi_14": _to_float_series(rsi),
-            "macd_line": _to_float_series(macd_line),
-            "macd_signal": _to_float_series(macd_signal),
-            "macd_histogram": _to_float_series(macd_histogram),
-            "bb_upper": _to_float_series(bb_upper),
-            "bb_middle": _to_float_series(bb_middle),
-            "bb_lower": _to_float_series(bb_lower),
-            "stoch_k": _to_float_series(stoch_k),
-            "stoch_d": _to_float_series(stoch_d),
-            "atr_14": _to_float_series(atr_14),
-            "obv": _to_float_series(obv),
-        },
-        "signals": {
-            "rsi": rsi_signal,
-            "macd": macd_bias,
-            "golden_cross": bool(golden_cross),
-            "price_vs_sma200": price_vs_sma200,
-            "summary": summary,
-        },
-    }
+    return build_technical_payload(
+        symbol,
+        frame,
+        time_col="time",
+        open_col="open",
+        high_col="high",
+        low_col="low",
+        close_col="close",
+        volume_col="volume",
+    )
 
 
 # ── Routes ────────────────────────────────────────────────────────────
-
-
-@router.get("/api/health")
-async def health_check() -> dict[str, str]:
-    async with AsyncSessionLocal() as db:
-        try:
-            await db.execute(text("SELECT 1"))
-            return {"status": "ok", "database": "mysql-connected"}
-        except Exception as exc:
-            logger.error("Health check DB error: %s", exc)
-            return {"status": "error", "database": f"mysql-error:{exc.__class__.__name__}"}
 
 
 @router.get("/api/stocks")

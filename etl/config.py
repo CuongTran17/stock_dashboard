@@ -85,7 +85,7 @@ GOOGLE_NEWS_COLUMNS: list[str] = [
     "google_news_headlines",
 ]
 
-# Danh sách macro numeric columns sẽ được ffill (KHÔNG bfill) ở bước transform.
+# Macro numeric columns are ffilled only; leading nulls fall back to 0.0.
 MACRO_NUMERIC_COLUMNS: list[str] = [
     f"macro_{prefix}_{suffix}"
     for prefix in ("vnindex", "vn30", "hnxindex", "upcomindex")

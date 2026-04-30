@@ -19,9 +19,9 @@ from etl.config import (
     SCHEDULE_TIMEZONE,
     EtlConfig,
 )
+from etl.execution import run_etl_in_process, shutdown_etl_process_pool
 from etl.health import check_etl_health
 from etl.load_to_mysql import load_financial_cache
-from etl.run_etl import run
 
 log = logging.getLogger(__name__)
 
@@ -93,8 +93,7 @@ class EtlScheduler:
     async def _run_daily_etl(self, cfg_factory: Callable[[], EtlConfig]) -> None:
         cfg = cfg_factory()
         log.info("Daily ETL started run_id=%s symbols=%d", cfg.run_id, len(cfg.symbols))
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, partial(run, cfg))
+        await run_etl_in_process(cfg)
         log.info("Daily ETL completed run_id=%s", cfg.run_id)
 
     async def _refresh_caches(
@@ -144,6 +143,7 @@ class EtlScheduler:
     def shutdown(self) -> None:
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)
+        shutdown_etl_process_pool()
 
 
 def _parse_args() -> argparse.Namespace:

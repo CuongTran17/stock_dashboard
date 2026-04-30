@@ -9,7 +9,8 @@ This module is intentionally thin:
 Business logic and helper functions live in:
   - src/utils.py          – pure helpers (no FastAPI, no DB)
   - src/cache.py          – DB-backed cache helpers
-  - src/routes/stocks.py  – /api/stocks/* and /api/health
+  - src/routes/stocks.py  – /api/stocks/*
+  - src/routes/health.py  – /api/health/*
   - src/routes/analysis.py – /api/analysis/*
   - src/routes/market.py  – /api/market-indices/*, /api/news, /api/events
   - src/routes/internal.py – /api/dnse/*, /api/debug/*
@@ -22,12 +23,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.admin import router as admin_router
 from src.api.auth import router as auth_router
+from src.api_errors import register_error_handlers
 from src.api.payment import router as payment_router
 from src.api.portfolio import router as portfolio_router
 from src.database.db import init_db
 from src.jobs import build_lifespan
+from src.observability import RequestIdMiddleware
 from src.routes.analysis import router as analysis_router
 from src.routes.etl_status import router as etl_status_router
+from src.routes.health import router as health_router
 from src.routes.internal import router as internal_router
 from src.routes.market import router as market_router
 from src.routes.stocks import router as stocks_router
@@ -62,6 +66,7 @@ lifespan = build_lifespan(
 
 app = FastAPI(title="VNStock Intraday API V2", lifespan=lifespan, version="2.0.0")
 
+app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_cors_origins,
@@ -69,6 +74,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+register_error_handlers(app)
 
 # ── Routers ───────────────────────────────────────────────────────────
 
@@ -76,6 +82,7 @@ app.include_router(auth_router)
 app.include_router(payment_router)
 app.include_router(admin_router)
 app.include_router(portfolio_router)
+app.include_router(health_router)
 app.include_router(stocks_router)
 app.include_router(analysis_router)
 app.include_router(etl_status_router)

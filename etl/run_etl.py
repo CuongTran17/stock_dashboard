@@ -48,6 +48,7 @@ from etl.extract.extract_prices import extract_index_prices, extract_symbol_pric
 from etl.load_to_mysql import load_all, load_eod_rows
 from etl.load_to_parquet import cleanup_old_snapshots, save_processed_parquet
 from etl.logging_setup import get_logger, setup_logging
+from etl.processed_files import latest_processed_parquet
 from etl.run_metadata import RunMetadata, complete_metadata, running_metadata, save_run_metadata
 from etl.transform.transform_aggregate import aggregate_all_ticks_to_eod
 from etl.transform.build_dataset import build_full_dataset, validate_dataset
@@ -56,15 +57,7 @@ log = get_logger(__name__)
 
 
 def _latest_processed_parquet(cfg: EtlConfig) -> Path | None:
-    files = sorted(
-        (
-            path for path in cfg.processed_dir.glob("market_data_*.parquet")
-            if cfg.run_id not in path.name
-        ),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    return files[0] if files else None
+    return latest_processed_parquet(cfg.processed_dir, exclude_run_id=cfg.run_id)
 
 
 def _resolve_incremental_cfg(cfg: EtlConfig) -> EtlConfig:

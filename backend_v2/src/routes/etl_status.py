@@ -21,7 +21,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from etl.config import DEFAULT_SYMBOLS, EtlConfig
 from etl.health import check_etl_health, get_recent_runs
-from etl.run_etl import run
+from etl.execution import run_etl_in_process
 
 router = APIRouter(prefix="/api/etl", tags=["ETL"])
 _require_admin = require_role("admin")
@@ -119,7 +119,7 @@ async def trigger_etl_run(
         )
 
     async def _run_background() -> None:
-        await asyncio.get_running_loop().run_in_executor(None, run, cfg)
+        await run_etl_in_process(cfg)
 
     asyncio.create_task(_run_background(), name=f"manual-etl-{cfg.run_id}")
     return {"run_id": cfg.run_id, "status": "started", "symbols": cfg.symbols}

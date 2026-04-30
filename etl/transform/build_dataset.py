@@ -223,10 +223,12 @@ def build_symbol_dataset(
 
     prices = prices.sort_values("data_date").reset_index(drop=True)
 
-    # >>> FIX LOOK-AHEAD BIAS: chỉ ffill, KHÔNG bfill <<<
+    # Anti look-ahead: only carry past macro values forward.
+    # Remaining leading nulls are filled with 0.0 instead of bfill, so we do not
+    # leak future macro prices into the first rows of the dataset.
     macro_present = [c for c in MACRO_NUMERIC_COLUMNS if c in prices.columns]
     if macro_present:
-        prices[macro_present] = prices[macro_present].ffill()
+        prices[macro_present] = prices[macro_present].ffill().fillna(0.0)
 
     # 8. Đảm bảo đủ cột chuẩn
     for col in FINAL_COLUMNS:
