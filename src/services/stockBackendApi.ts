@@ -16,7 +16,20 @@ export interface HealthResponse {
 interface ApiMeta {
   source?: string
   last_synced_at?: string
+  data_status?: MarketDataStatus
+  run_id?: string | null
+  stale?: boolean
+  message?: string | null
 }
+
+export type MarketDataStatus =
+  | 'DATA_AVAILABLE'
+  | 'NO_DATA_IN_SNAPSHOT'
+  | 'SNAPSHOT_NOT_BUILT'
+  | 'REFRESH_DISABLED_IN_SNAPSHOT_MODE'
+  | 'ETL_RUNNING'
+  | 'ETL_FAILED'
+  | 'STALE_SNAPSHOT'
 
 export interface HistoricalRecord {
   time: string
@@ -236,8 +249,8 @@ class StockBackendApi {
     symbol: string,
     refresh: boolean = false,
   ): Promise<CompanyOverview> {
-    const query = this.buildQuery({ refresh: refresh || undefined })
-    return this.fetch<CompanyOverview>(`/api/stocks/${symbol.toUpperCase()}/overview${query}`)
+    void refresh
+    return this.fetch<CompanyOverview>(`/api/stocks/${symbol.toUpperCase()}/overview`)
   }
 
   async getHistory(
@@ -247,11 +260,11 @@ class StockBackendApi {
     limit: number = 365,
     refresh: boolean = false,
   ): Promise<HistoryResponse> {
+    void refresh
     const query = this.buildQuery({
       start_date: startDate,
       end_date: endDate,
       limit,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<HistoryResponse>(`/api/stocks/${symbol.toUpperCase()}/history${query}`)
@@ -263,10 +276,10 @@ class StockBackendApi {
     refresh: boolean = false,
     force: boolean = false,
   ): Promise<IntradayResponse> {
+    void refresh
+    void force
     const query = this.buildQuery({
       limit,
-      refresh: refresh || undefined,
-      force: force || undefined,
     })
 
     return this.fetch<IntradayResponse>(`/api/stocks/${symbol.toUpperCase()}/intraday${query}`)
@@ -278,10 +291,10 @@ class StockBackendApi {
     refresh: boolean = false,
     force: boolean = false,
   ): Promise<TicksResponse> {
+    void refresh
+    void force
     const query = this.buildQuery({
       limit,
-      refresh: refresh || undefined,
-      force: force || undefined,
     })
 
     return this.fetch<TicksResponse>(`/api/stocks/${symbol.toUpperCase()}/ticks${query}`)
@@ -294,11 +307,11 @@ class StockBackendApi {
     limit: number = 365,
     refresh: boolean = false,
   ): Promise<TechnicalResponse> {
+    void refresh
     const query = this.buildQuery({
       start_date: startDate,
       end_date: endDate,
       limit,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<TechnicalResponse>(`/api/stocks/${symbol.toUpperCase()}/technical${query}`)
@@ -309,7 +322,8 @@ class StockBackendApi {
     reportType: 'income' | 'balance' | 'cashflow' | 'ratios' = 'income',
     refresh: boolean = false,
   ): Promise<FinancialsResponse> {
-    const query = this.buildQuery({ report_type: reportType, refresh: refresh || undefined })
+    void refresh
+    const query = this.buildQuery({ report_type: reportType })
     return this.fetch<FinancialsResponse>(`/api/stocks/${symbol.toUpperCase()}/financials${query}`)
   }
 
@@ -319,11 +333,11 @@ class StockBackendApi {
     limit: number = 365,
     refresh: boolean = false,
   ): Promise<MarketIndicesResponse> {
+    void refresh
     const query = this.buildQuery({
       start_date: startDate,
       end_date: endDate,
       limit,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<MarketIndicesResponse>(`/api/market-indices${query}`)
@@ -336,11 +350,11 @@ class StockBackendApi {
     limit: number = 365,
     refresh: boolean = false,
   ): Promise<MarketIndexHistoryResponse> {
+    void refresh
     const query = this.buildQuery({
       start_date: startDate,
       end_date: endDate,
       limit,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<MarketIndexHistoryResponse>(`/api/market-indices/${indexSymbol.toUpperCase()}/history${query}`)
@@ -350,13 +364,13 @@ class StockBackendApi {
     symbols: string[],
     refresh: boolean = false,
   ): Promise<SnapshotsResponse> {
+    void refresh
     const normalized = symbols
       .map((symbol) => symbol.trim().toUpperCase())
       .filter((symbol) => symbol.length > 0)
 
     const query = this.buildQuery({
       symbols: normalized.length > 0 ? normalized.join(',') : undefined,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<SnapshotsResponse>(`/api/stocks/snapshots${query}`)
@@ -367,6 +381,7 @@ class StockBackendApi {
     limit: number = 24,
     refresh: boolean = false,
   ): Promise<MarketNewsResponse> {
+    void refresh
     const normalized = (symbols || [])
       .map((symbol) => symbol.trim().toUpperCase())
       .filter((symbol) => symbol.length > 0)
@@ -374,7 +389,6 @@ class StockBackendApi {
     const query = this.buildQuery({
       symbols: normalized.length > 0 ? normalized.join(',') : undefined,
       limit,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<MarketNewsResponse>(`/api/news${query}`)
@@ -401,6 +415,7 @@ class StockBackendApi {
     limit: number = 24,
     refresh: boolean = false,
   ): Promise<MarketEventsResponse> {
+    void refresh
     const normalized = (symbols || [])
       .map((symbol) => symbol.trim().toUpperCase())
       .filter((symbol) => symbol.length > 0)
@@ -408,7 +423,6 @@ class StockBackendApi {
     const query = this.buildQuery({
       symbols: normalized.length > 0 ? normalized.join(',') : undefined,
       limit,
-      refresh: refresh || undefined,
     })
 
     return this.fetch<MarketEventsResponse>(`/api/events${query}`)
