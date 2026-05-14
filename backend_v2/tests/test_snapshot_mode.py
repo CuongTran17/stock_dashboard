@@ -67,5 +67,39 @@ class ReadOnlyLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["init_db", "inside"])
 
 
+class StockReadApiSnapshotModeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_snapshot_refresh_param_is_rejected(self):
+        from src.routes.stocks import get_snapshots
+
+        with self.assertRaises(HTTPException) as ctx:
+            await get_snapshots(symbols="FPT", refresh=True)
+
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail["code"], "REFRESH_DISABLED_IN_SNAPSHOT_MODE")
+
+    async def test_history_does_not_auto_fetch_when_db_empty(self):
+        from src.routes import stocks
+
+        async def empty_history(*args, **kwargs):
+            return []
+
+        async def forbidden_refresh(*args, **kwargs):
+            raise AssertionError("read API attempted to create market data")
+
+        original_load = stocks.fetcher_service.load_history_from_db_async
+        original_refresh = stocks.fetcher_service.refresh_history_for_symbol
+        stocks.fetcher_service.load_history_from_db_async = empty_history
+        stocks.fetcher_service.refresh_history_for_symbol = forbidden_refresh
+        try:
+            result = await stocks.get_history("FPT", limit=30)
+        finally:
+            stocks.fetcher_service.load_history_from_db_async = original_load
+            stocks.fetcher_service.refresh_history_for_symbol = original_refresh
+
+        self.assertEqual(result["data_status"], "NO_DATA_IN_SNAPSHOT")
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["data"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

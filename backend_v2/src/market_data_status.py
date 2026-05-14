@@ -42,8 +42,9 @@ def market_meta(
     }
 
 
-def reject_refresh_in_snapshot_mode(refresh: bool) -> None:
-    if not refresh:
+def reject_refresh_in_snapshot_mode(refresh: bool | str | object) -> None:
+    requested = refresh is True or (isinstance(refresh, str) and refresh.strip().lower() == "true")
+    if not requested:
         return
 
     raise HTTPException(

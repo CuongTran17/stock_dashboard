@@ -6,7 +6,6 @@ indicators, and financial reports.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -21,7 +20,7 @@ from src.cache import (
     _save_technical_cache,
 )
 from src.database.models import CompanyOverviewCache
-from src.services.fundamental_fetcher import fundamental_service
+from src.market_data_status import DATA_AVAILABLE, NO_DATA_IN_SNAPSHOT, reject_refresh_in_snapshot_mode
 from src.services.vnstock_fetcher import (
     VN30_SYMBOLS,
     fetcher_service,
@@ -47,7 +46,6 @@ settings = get_settings()
 
 # Constants (mirror from main until fully extracted)
 INTRADAY_STALE_SECONDS = settings.vnstock_intraday_stale_seconds
-INTRADAY_REFRESH_TIMEOUT_SECONDS = settings.vnstock_intraday_refresh_timeout_seconds
 TECHNICAL_CACHE_TTL_SECONDS = settings.vnstock_technical_cache_ttl_seconds
 
 router = APIRouter(tags=["Stocks"])
@@ -80,59 +78,18 @@ def _validate_vn30_symbol(symbol: str) -> str:
     return normalized
 
 
-async def _safe_refresh_symbols_once(symbols: list[str], ignore_session: bool = False) -> int:
-    try:
-        return await asyncio.wait_for(
-            fetcher_service.refresh_symbols_once(symbols, ignore_session=ignore_session),
-            timeout=INTRADAY_REFRESH_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "Timed out refreshing symbols after %.1fs (symbols=%s)",
-            INTRADAY_REFRESH_TIMEOUT_SECONDS,
-            ",".join(symbols[:6]),
-        )
-        return 0
-    except Exception as exc:
-        logger.warning("Failed guarded refresh for symbols %s: %s", symbols[:6], exc)
-        return 0
-
-
-async def _safe_refresh_symbol(symbol: str, ignore_session: bool = False) -> bool:
-    try:
-        return await asyncio.wait_for(
-            fetcher_service.refresh_symbol_intraday(symbol, ignore_session=ignore_session),
-            timeout=INTRADAY_REFRESH_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.warning(
-            "Timed out refreshing symbol %s after %.1fs",
-            symbol,
-            INTRADAY_REFRESH_TIMEOUT_SECONDS,
-        )
-        return False
-    except Exception as exc:
-        logger.warning("Failed guarded refresh for symbol %s: %s", symbol, exc)
-        return False
-
-
-async def _ensure_history_data(
+async def _load_history_data(
     symbol: str,
     start_date: Optional[date],
     end_date: Optional[date],
     limit: int,
 ) -> list[dict[str, Any]]:
-    records = await fetcher_service.load_history_from_db_async(symbol, start_date=start_date, end_date=end_date, limit=limit)
-    if records:
-        return records
-
-    await fetcher_service.refresh_history_for_symbol(
+    return await fetcher_service.load_history_from_db_async(
         symbol,
         start_date=start_date,
         end_date=end_date,
-        lookback_days=max(limit, 365),
+        limit=limit,
     )
-    return await fetcher_service.load_history_from_db_async(symbol, start_date=start_date, end_date=end_date, limit=limit)
 
 
 def _calculate_technical_payload(symbol: str, history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -162,14 +119,9 @@ async def get_snapshots(
     symbols: Optional[str] = Query(default=None, description="Comma-separated symbols"),
     refresh: bool = Query(default=False, description="Force refresh from vnstock before returning"),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
     target_symbols = parse_symbols_query(symbols, fallback=VN30_SYMBOLS)
     in_session = fetcher_service.is_intraday_fetch_window()
-    auto_refresh = in_session and _intraday_cache_is_stale()
-    should_refresh = refresh or auto_refresh
-
-    if should_refresh:
-        await _safe_refresh_symbols_once(target_symbols)
-
     snapshots = fetcher_service.get_snapshots(target_symbols)
     synced_candidates = [
         item.get("syncedAt")
@@ -183,11 +135,12 @@ async def get_snapshots(
         "data": snapshots,
         "cached_at": datetime.now(timezone.utc).isoformat(),
         "last_synced_at": latest_sync,
-        "source": "vnstock-v2",
-        "refreshed": should_refresh,
-        "auto_refreshed": auto_refresh and not refresh,
+        "source": "snapshot-mysql-cache",
+        "refreshed": False,
+        "auto_refreshed": False,
         "is_in_session": in_session,
         "cache_age_seconds": _intraday_cache_age_seconds(),
+        "data_status": DATA_AVAILABLE if snapshots else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -196,44 +149,31 @@ async def get_overview(
     symbol: str,
     refresh: bool = Query(default=False, description="Force refresh overview and valuation from vnstock"),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
     snapshot = fetcher_service.get_snapshot(normalized)
 
     overview_payload: dict[str, Any] = {}
     overview_synced_at: Optional[str] = None
-    if not refresh:
-        cached_overview, cached_synced_at = await _load_symbol_payload_cache(
-            CompanyOverviewCache,
-            normalized,
-            max_age_seconds=None,
-        )
-        if isinstance(cached_overview, dict):
-            overview_payload = dict(cached_overview)
-            overview_synced_at = cached_synced_at
-
-    if refresh or not overview_payload:
-        refreshed_overview, refreshed_synced_at = await fundamental_service.refresh_company_overview(normalized)
-        if refreshed_overview:
-            overview_payload = dict(refreshed_overview)
-            overview_synced_at = refreshed_synced_at
+    cached_overview, cached_synced_at = await _load_symbol_payload_cache(
+        CompanyOverviewCache,
+        normalized,
+        max_age_seconds=None,
+    )
+    if isinstance(cached_overview, dict):
+        overview_payload = dict(cached_overview)
+        overview_synced_at = cached_synced_at
 
     ratio_records: list[dict[str, Any]] = []
     ratios_synced_at: Optional[str] = None
-    if not refresh:
-        cached_ratios, cached_ratio_synced_at = await _load_financial_report_cache(
-            normalized,
-            "ratios",
-            max_age_seconds=None,
-        )
-        if isinstance(cached_ratios, list):
-            ratio_records = list(cached_ratios)
-            ratios_synced_at = cached_ratio_synced_at
-
-    if refresh or not ratio_records:
-        refreshed_ratios, refreshed_ratio_synced_at = await fundamental_service.refresh_financial_report(normalized, "ratios")
-        if refreshed_ratios:
-            ratio_records = list(refreshed_ratios)
-            ratios_synced_at = refreshed_ratio_synced_at
+    cached_ratios, cached_ratio_synced_at = await _load_financial_report_cache(
+        normalized,
+        "ratios",
+        max_age_seconds=None,
+    )
+    if isinstance(cached_ratios, list):
+        ratio_records = list(cached_ratios)
+        ratios_synced_at = cached_ratio_synced_at
 
     valuation = _extract_valuation_from_ratios(ratio_records)
     company_name = (
@@ -280,8 +220,9 @@ async def get_overview(
         "roa": valuation.get("roa"),
         "market_cap": valuation.get("market_cap"),
         "last_update": snapshot.get("lastUpdate"),
-        "source": "mysql-cache+vnstock",
+        "source": "mysql-cache",
         "last_synced_at": last_synced_at,
+        "data_status": DATA_AVAILABLE if overview_payload or ratio_records else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -293,23 +234,17 @@ async def get_history(
     limit: int = Query(default=365, ge=1, le=5000),
     refresh: bool = Query(default=False, description="Force refresh historical data from vnstock before reading MySQL"),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
-    if refresh:
-        await fetcher_service.refresh_history_for_symbol(
-            normalized,
-            start_date=start_date,
-            end_date=end_date,
-            lookback_days=max(limit, 365),
-        )
-
-    records = await _ensure_history_data(normalized, start_date=start_date, end_date=end_date, limit=limit)
+    records = await _load_history_data(normalized, start_date=start_date, end_date=end_date, limit=limit)
 
     return {
         "symbol": normalized,
         "count": len(records),
         "data": records,
-        "source": "mysql-history-refresh" if refresh else "mysql",
+        "source": "mysql",
         "last_synced_at": fetcher_service.last_history_sync_at.get(normalized),
+        "data_status": DATA_AVAILABLE if records else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -321,11 +256,9 @@ async def get_intraday(
     refresh: bool = Query(default=False, description="Force refresh intraday from vnstock before reading cache"),
     force: bool = Query(default=False, description="Allow refresh outside trading session windows (debug)"),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
+    del force
     normalized = _validate_vn30_symbol(symbol)
-    refreshed = False
-
-    if refresh:
-        refreshed = await _safe_refresh_symbol(normalized, ignore_session=force)
 
     tick_window = min(max(limit * max(interval_minutes, 1) * 12, 600), 5000)
     cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=tick_window)
@@ -341,11 +274,12 @@ async def get_intraday(
         "ticks_count": len(ticks),
         "data": bars,
         "interval_minutes": interval_minutes,
-        "source": "intraday-cache-refresh" if refresh else "intraday-cache",
+        "source": "intraday-cache",
         "last_synced_at": fetcher_service.last_intraday_sync_at,
         "is_in_session": fetcher_service.is_intraday_fetch_window(),
-        "refreshed": bool(refreshed),
-        "forced": force,
+        "refreshed": False,
+        "forced": False,
+        "data_status": DATA_AVAILABLE if bars else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -357,22 +291,13 @@ async def get_ticks(
     force: bool = Query(default=False),
 ) -> dict[str, Any]:
     """Return raw intraday trade ticks (sổ lệnh — matched orders) for a symbol."""
+    reject_refresh_in_snapshot_mode(refresh)
+    del force
     normalized = _validate_vn30_symbol(symbol)
     in_session = fetcher_service.is_intraday_fetch_window()
-    auto_refresh = in_session and _intraday_cache_is_stale()
-    refreshed = False
-
-    if refresh or auto_refresh:
-        refreshed = await _safe_refresh_symbol(normalized, ignore_session=force)
 
     cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=limit)
     ticks: list[dict] = cache_payload.get(normalized, [])
-
-    # Best-effort retry for in-session empty cache to reduce stale UI state.
-    if in_session and not ticks and not refreshed:
-        refreshed = await _safe_refresh_symbol(normalized, ignore_session=force)
-        cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=limit)
-        ticks = cache_payload.get(normalized, [])
 
     # Return most-recent first for order log display.
     ticks_desc = sorted(
@@ -387,9 +312,10 @@ async def get_ticks(
         "ticks": ticks_desc,
         "is_in_session": in_session,
         "last_synced_at": fetcher_service.last_intraday_sync_at,
-        "refreshed": bool(refreshed),
-        "auto_refreshed": auto_refresh and not refresh,
+        "refreshed": False,
+        "auto_refreshed": False,
         "cache_age_seconds": _intraday_cache_age_seconds(),
+        "data_status": DATA_AVAILABLE if ticks_desc else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -401,8 +327,21 @@ async def get_technical(
     limit: int = Query(default=365, ge=30, le=5000),
     refresh: bool = Query(default=False),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
-    records = await _ensure_history_data(normalized, start_date=start_date, end_date=end_date, limit=limit)
+    records = await _load_history_data(normalized, start_date=start_date, end_date=end_date, limit=limit)
+
+    if not records:
+        return {
+            "symbol": normalized,
+            "count": 0,
+            "ohlcv": {"time": [], "open": [], "high": [], "low": [], "close": [], "volume": []},
+            "indicators": {},
+            "signals": {},
+            "source": "mysql",
+            "last_synced_at": None,
+            "data_status": NO_DATA_IN_SNAPSHOT,
+        }
 
     history_count = len(records)
     history_last_time = str(records[-1].get("time")) if records else None
@@ -424,6 +363,7 @@ async def get_technical(
             payload = dict(cached_payload)
             payload["source"] = "mysql-technical-cache"
             payload["last_synced_at"] = fetcher_service.last_history_sync_at.get(normalized) or _row_iso_timestamp(cached_row.updated_at)
+            payload["data_status"] = DATA_AVAILABLE
             return payload
 
     payload = _calculate_technical_payload(normalized, records)
@@ -438,6 +378,7 @@ async def get_technical(
     )
     payload["source"] = "mysql"
     payload["last_synced_at"] = fetcher_service.last_history_sync_at.get(normalized) or technical_synced_at
+    payload["data_status"] = DATA_AVAILABLE
     return payload
 
 
@@ -447,51 +388,22 @@ async def get_financials(
     report_type: str = Query(default="income", pattern="^(income|balance|cashflow|ratios)$"),
     refresh: bool = Query(default=False, description="Force refresh financial report from vnstock"),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
 
-    cached_rows: Optional[list[dict[str, Any]]] = None
-    cached_synced_at: Optional[str] = None
-    if not refresh:
-        cached_rows, cached_synced_at = await _load_financial_report_cache(
-            normalized,
-            report_type,
-            max_age_seconds=None,
-        )
-
-    if not refresh and cached_rows is not None:
-        return {
-            "symbol": normalized,
-            "type": report_type,
-            "count": len(cached_rows),
-            "data": cached_rows,
-            "source": "mysql-financial-cache",
-            "last_synced_at": cached_synced_at,
-        }
-
-    rows, synced_at = await fundamental_service.refresh_financial_report(normalized, report_type)
-    if rows:
-        return {
-            "symbol": normalized,
-            "type": report_type,
-            "count": len(rows),
-            "data": rows,
-            "source": f"vnstock-finance-{report_type}",
-            "last_synced_at": synced_at,
-        }
-
-    stale_rows, stale_synced_at = await _load_financial_report_cache(
+    cached_rows, cached_synced_at = await _load_financial_report_cache(
         normalized,
         report_type,
         max_age_seconds=None,
     )
-    if stale_rows is None:
-        stale_rows = []
+    rows = cached_rows or []
 
     return {
         "symbol": normalized,
         "type": report_type,
-        "count": len(stale_rows),
-        "data": stale_rows,
-        "source": "mysql-financial-cache-stale",
-        "last_synced_at": stale_synced_at,
+        "count": len(rows),
+        "data": rows,
+        "source": "mysql-financial-cache",
+        "last_synced_at": cached_synced_at,
+        "data_status": DATA_AVAILABLE if rows else NO_DATA_IN_SNAPSHOT,
     }
