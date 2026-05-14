@@ -129,7 +129,7 @@ Backend:
 
 ```powershell
 cd backend_v2
-..\.venv\Scripts\python.exe run.py
+  ..\.venv\Scripts\python.exe run.py
 ```
 
 Hoặc từ thư mục gốc:
@@ -293,6 +293,47 @@ Module chính:
 - `etl/run_metadata.py`
 - `etl/run_etl.py`
 
+## Strict Snapshot Data Mode
+
+Market data uses a manual, reproducible snapshot model.
+
+Runtime invariants:
+
+- Backend startup is read-only for market data.
+- Read APIs never create market data.
+- Only CLI ETL and admin ETL trigger can write market snapshots/cache.
+- Missing or stale data is reported, not auto-fixed.
+
+Short-term serving:
+
+- MySQL cache tables serve stock/market APIs.
+- `lake/processed` and `lake/gold` remain the source of truth and audit trail.
+- User/app data remains in MySQL.
+
+Supported write paths:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB --run-mode incremental
+```
+
+```text
+POST /api/etl/trigger
+```
+
+Read API data statuses:
+
+- `DATA_AVAILABLE`
+- `NO_DATA_IN_SNAPSHOT`
+- `SNAPSHOT_NOT_BUILT`
+- `REFRESH_DISABLED_IN_SNAPSHOT_MODE`
+- `ETL_RUNNING`
+- `ETL_FAILED`
+- `STALE_SNAPSHOT`
+
+Long-term direction: MySQL should keep only user/app/business data. Stock and
+market data should move to a lakehouse/warehouse boundary based on
+bronze/silver/gold parquet and DuckDB views/marts.
+
 ## Chạy ETL
 
 Chạy incremental theo cấu hình mặc định:
@@ -327,7 +368,13 @@ Kiểm tra ETL health:
 
 ## Scheduler
 
-APScheduler có thể chạy embedded trong FastAPI hoặc standalone.
+Strict snapshot mode disables embedded FastAPI scheduling. Backend startup does
+not register ETL, preload, intraday, cache warmup, or EOD aggregation jobs.
+Manual CLI ETL and the admin ETL trigger are the supported update paths.
+
+The standalone scheduler module remains available for local inspection or future
+operations work, but it is not started by the web backend in strict snapshot
+mode.
 
 Lịch mặc định:
 
