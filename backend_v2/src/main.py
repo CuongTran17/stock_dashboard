@@ -36,8 +36,6 @@ from src.routes.internal import router as internal_router
 from src.routes.market import router as market_router
 from src.routes.stocks import router as stocks_router
 from src.routes.websocket import router as websocket_router
-from src.services.fundamental_fetcher import fundamental_service
-from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service
 from src.settings import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -46,21 +44,9 @@ settings = get_settings()
 
 # ── Preload configuration ─────────────────────────────────────────────
 
-PRELOAD_REFERENCE_CACHE_ENABLED = settings.vnstock_preload_reference_cache
-PRELOAD_REFERENCE_FORCE_REFRESH = settings.vnstock_preload_force_refresh
-PRELOAD_REFERENCE_SYMBOL_LIMIT = max(1, min(len(VN30_SYMBOLS), settings.vnstock_preload_symbol_limit))
-
 # ── Lifespan ──────────────────────────────────────────────────────────
 
-lifespan = build_lifespan(
-    init_db=init_db,
-    fetcher_service=fetcher_service,
-    fundamental_service=fundamental_service,
-    vn30_symbols=VN30_SYMBOLS,
-    preload_reference_cache_enabled=PRELOAD_REFERENCE_CACHE_ENABLED,
-    preload_reference_force_refresh=PRELOAD_REFERENCE_FORCE_REFRESH,
-    preload_reference_symbol_limit=PRELOAD_REFERENCE_SYMBOL_LIMIT,
-)
+lifespan = build_lifespan(init_db=init_db)
 
 # ── App ───────────────────────────────────────────────────────────────
 

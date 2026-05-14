@@ -48,5 +48,24 @@ class MarketDataStatusTests(unittest.TestCase):
         self.assertIsNone(reject_refresh_in_snapshot_mode(False))
 
 
+class ReadOnlyLifespanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lifespan_initializes_db_without_market_background_work(self):
+        from src.jobs import build_lifespan
+
+        calls = []
+
+        def init_db():
+            calls.append("init_db")
+
+        class App:
+            pass
+
+        lifespan = build_lifespan(init_db=init_db)
+        async with lifespan(App()):
+            calls.append("inside")
+
+        self.assertEqual(calls, ["init_db", "inside"])
+
+
 if __name__ == "__main__":
     unittest.main()
