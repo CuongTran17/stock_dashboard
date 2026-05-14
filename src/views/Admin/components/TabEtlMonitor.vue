@@ -49,6 +49,7 @@
             <span class="h-3 w-3 rounded-full" :class="statusDotClass"></span>
             <span class="text-xl font-bold capitalize text-gray-800 dark:text-white/90">{{ status?.status || health?.status || 'unknown' }}</span>
           </div>
+          <p class="mt-2 font-mono text-xs text-gray-500 dark:text-gray-400">{{ dataStatus }}</p>
           <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ health?.details || status?.details || 'Chưa có dữ liệu health.' }}</p>
         </div>
 
@@ -312,6 +313,7 @@ const loadTargets = [
 ]
 
 const latestSnapshot = computed(() => health.value?.latest_snapshot || null)
+const dataStatus = computed(() => status.value?.data_status || health.value?.data_status || 'SNAPSHOT_NOT_BUILT')
 const latestRunId = computed(() => status.value?.last_run_id || health.value?.latest_run?.run_id || latestSnapshot.value?.run_id || 'N/A')
 const latestRowCount = computed(() => status.value?.row_count || health.value?.latest_run?.row_count || latestSnapshot.value?.row_count || 0)
 const latestSymbols = computed(() => status.value?.symbols?.length ? status.value.symbols : latestSnapshot.value?.symbols || [])
@@ -481,7 +483,7 @@ async function triggerManualRun(): Promise<void> {
   triggering.value = true
   try {
     const result = await triggerEtlRun()
-    showNotice(`Đã khởi chạy ETL ${result.run_id} cho ${result.symbols.length} mã.`, 'success')
+    showNotice(`Da khoi chay ETL ${result.run_id} cho ${result.symbols.length} ma (${result.data_status || 'ETL_RUNNING'}).`, 'success')
     await loadMonitor()
   } catch (err) {
     showNotice(err instanceof Error ? err.message : 'Không khởi chạy được ETL.', 'error')

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from src.api.auth import require_role
 from src.database.models import User
+from src.market_data_status import DATA_AVAILABLE, ETL_FAILED, ETL_RUNNING, SNAPSHOT_NOT_BUILT, STALE_SNAPSHOT
 from src.settings import get_settings
 from src.services.vnstock_fetcher import VN30_SYMBOLS
 
@@ -54,13 +55,29 @@ def _default_cfg(symbols: list[str] | None = None) -> EtlConfig:
     )
 
 
+def _etl_data_status(health: dict) -> str:
+    latest_run = health.get("latest_run") or {}
+    latest_snapshot = health.get("latest_snapshot")
+    if latest_run.get("status") == "running":
+        return ETL_RUNNING
+    if latest_run.get("status") == "failed":
+        return ETL_FAILED
+    if not latest_snapshot:
+        return SNAPSHOT_NOT_BUILT
+    if health.get("status") == "stale":
+        return STALE_SNAPSHOT
+    return DATA_AVAILABLE
+
+
 @router.get("/status")
 async def get_etl_status() -> dict:
     health = check_etl_health(_default_cfg())
+    data_status = _etl_data_status(health)
     latest = health.get("latest_run") or {}
     snapshot = health.get("latest_snapshot") or {}
     return {
         "status": health["status"],
+        "data_status": data_status,
         "details": health["details"],
         "last_run_id": latest.get("run_id") or snapshot.get("run_id"),
         "last_run_time": latest.get("completed_at") or snapshot.get("_mtime"),
@@ -77,7 +94,9 @@ async def get_etl_runs(limit: int = Query(default=10, ge=1, le=100)) -> dict:
 
 @router.get("/health")
 async def get_etl_health() -> dict:
-    return check_etl_health(_default_cfg())
+    health = check_etl_health(_default_cfg())
+    health["data_status"] = _etl_data_status(health)
+    return health
 
 
 @router.post("/trigger")
@@ -122,4 +141,4 @@ async def trigger_etl_run(
         await run_etl_in_process(cfg)
 
     asyncio.create_task(_run_background(), name=f"manual-etl-{cfg.run_id}")
-    return {"run_id": cfg.run_id, "status": "started", "symbols": cfg.symbols}
+    return {"run_id": cfg.run_id, "status": "started", "data_status": ETL_RUNNING, "symbols": cfg.symbols}

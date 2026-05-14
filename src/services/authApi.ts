@@ -151,6 +151,15 @@ export interface FlashSalePayload {
   is_active: boolean
 }
 
+export type MarketDataStatus =
+  | 'DATA_AVAILABLE'
+  | 'NO_DATA_IN_SNAPSHOT'
+  | 'SNAPSHOT_NOT_BUILT'
+  | 'REFRESH_DISABLED_IN_SNAPSHOT_MODE'
+  | 'ETL_RUNNING'
+  | 'ETL_FAILED'
+  | 'STALE_SNAPSHOT'
+
 export interface EtlRunMetadata {
   run_id: string
   started_at: string
@@ -208,6 +217,7 @@ export interface EtlSnapshotMetadata {
 
 export interface EtlStatusResponse {
   status: string
+  data_status?: MarketDataStatus
   details: string
   last_run_id?: string | null
   last_run_time?: string | null
@@ -217,6 +227,7 @@ export interface EtlStatusResponse {
 
 export interface EtlHealthResponse {
   status: string
+  data_status?: MarketDataStatus
   details: string
   age_hours?: number | null
   missing_symbols: string[]
@@ -246,6 +257,7 @@ export interface EtlTriggerPayload {
 export interface EtlTriggerResponse {
   run_id: string
   status: string
+  data_status?: MarketDataStatus
   symbols: string[]
 }
 
