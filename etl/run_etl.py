@@ -24,7 +24,7 @@ import logging
 import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -79,7 +79,7 @@ def _resolve_incremental_cfg(cfg: EtlConfig) -> EtlConfig:
     if pd.isna(latest_date):
         return cfg
 
-    resolved_start = (latest_date.date() - pd.Timedelta(days=max(cfg.incremental_overlap_days, 0))).date()
+    resolved_start = latest_date.date() - timedelta(days=max(cfg.incremental_overlap_days, 0))
     if resolved_start > cfg.user_end:
         resolved_start = cfg.user_end
     if resolved_start != cfg.user_start:
