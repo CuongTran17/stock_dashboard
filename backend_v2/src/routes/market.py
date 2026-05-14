@@ -5,25 +5,24 @@ Covers market index history/quotes, news feed and corporate events.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
-from vnstock import Quote
 
-from src.services.fundamental_fetcher import fundamental_service
-from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service, parse_symbols_query
+from src.cache import _load_symbol_payload_cache
+from src.database.models import EventsCache, NewsCache
+from src.market_data_status import DATA_AVAILABLE, NO_DATA_IN_SNAPSHOT, reject_refresh_in_snapshot_mode
+from src.services.vnstock_fetcher import VN30_SYMBOLS, parse_symbols_query
 from src.settings import get_settings
 from src.utils import (
-    _cache_fresh,
     _parse_datetime,
     _to_float,
     _to_int,
-    _to_iso_date,
     _utc_now,
 )
 
@@ -57,9 +56,6 @@ MARKET_INDEX_ALIASES: dict[str, str] = {
 
 # ── In-memory caches ──────────────────────────────────────────────────
 
-_market_index_history_cache: dict[str, dict[str, Any]] = {}
-_market_index_lock = asyncio.Lock()
-
 router = APIRouter(tags=["Market"])
 
 
@@ -78,42 +74,45 @@ def _normalize_market_index_symbol(symbol: str) -> str:
     )
 
 
-def _market_index_history_cache_key(
-    index_symbol: str,
-    start_date: Optional[date],
-    end_date: Optional[date],
-    limit: int,
-) -> str:
-    start_value = start_date.isoformat() if start_date else ""
-    end_value = end_date.isoformat() if end_date else ""
-    return f"{index_symbol}|{start_value}|{end_value}|{limit}"
-
-
-def _fetch_market_index_history_sync(vnstock_symbol: str, start: str, end: str) -> list[dict[str, Any]]:
-    quote = Quote(source=fetcher_service.quote_source, symbol=vnstock_symbol)
-    frame = quote.history(start=start, end=end, interval="1D")
-    if frame is None or frame.empty:
+def _load_market_index_history_from_lake(index_symbol: str, limit: int) -> list[dict[str, Any]]:
+    latest = REPO_ROOT / "lake" / "gold" / "market_features" / "latest.parquet"
+    if not latest.exists():
         return []
 
-    rows: list[dict[str, Any]] = []
-    for raw in frame.to_dict("records"):
-        row_date = _to_iso_date(raw.get("time") or raw.get("date"))
-        if not row_date:
-            continue
+    frame = pd.read_parquet(latest)
+    vnstock_symbol = MARKET_INDEX_DEFINITIONS[index_symbol]["vnstock_symbol"].lower()
+    close_column = f"macro_{vnstock_symbol}_close"
+    volume_column = f"macro_{vnstock_symbol}_volume"
+    if "data_date" not in frame.columns or close_column not in frame.columns:
+        return []
 
-        rows.append(
+    columns = ["data_date", close_column]
+    if volume_column in frame.columns:
+        columns.append(volume_column)
+
+    rows = (
+        frame[columns]
+        .dropna(subset=["data_date", close_column])
+        .drop_duplicates(subset=["data_date"], keep="last")
+        .sort_values("data_date")
+        .tail(max(limit, 1))
+    )
+
+    output: list[dict[str, Any]] = []
+    for raw in rows.to_dict("records"):
+        close = _to_float(raw.get(close_column))
+        volume = _to_int(raw.get(volume_column)) if volume_column in raw else 0
+        output.append(
             {
-                "time": row_date,
-                "open": _to_float(raw.get("open")),
-                "high": _to_float(raw.get("high")),
-                "low": _to_float(raw.get("low")),
-                "close": _to_float(raw.get("close")),
-                "volume": _to_int(raw.get("volume")),
+                "time": str(raw.get("data_date")),
+                "open": close,
+                "high": close,
+                "low": close,
+                "close": close,
+                "volume": volume,
             }
         )
-
-    rows.sort(key=lambda item: str(item.get("time") or ""))
-    return rows
+    return output
 
 
 async def _get_market_index_history_rows(
@@ -123,48 +122,13 @@ async def _get_market_index_history_rows(
     limit: int,
     refresh: bool,
 ) -> tuple[list[dict[str, Any]], Optional[str], str]:
+    reject_refresh_in_snapshot_mode(refresh)
     safe_limit = max(2, min(limit, 5000))
-    safe_end_date = end_date or _utc_now().date()
-    safe_start_date = start_date or (safe_end_date - timedelta(days=max(safe_limit * 2, MARKET_INDEX_LOOKBACK_DAYS)))
-    if safe_start_date > safe_end_date:
-        safe_start_date, safe_end_date = safe_end_date, safe_start_date
-
-    cache_key = _market_index_history_cache_key(index_symbol, safe_start_date, safe_end_date, safe_limit)
-    if not refresh:
-        async with _market_index_lock:
-            entry = _market_index_history_cache.get(cache_key)
-            if _cache_fresh(entry, MARKET_INDEX_HISTORY_TTL_SECONDS):
-                return list(entry.get("rows", [])), entry.get("synced_at"), "memory-market-index-cache"
-
-    await fetcher_service.wait_for_rate_slot()
-    definition = MARKET_INDEX_DEFINITIONS[index_symbol]
-    try:
-        rows = await asyncio.to_thread(
-            _fetch_market_index_history_sync,
-            definition["vnstock_symbol"],
-            safe_start_date.isoformat(),
-            safe_end_date.isoformat(),
-        )
-        clipped_rows = rows[-safe_limit:]
-        synced_at = _utc_now().isoformat()
-
-        async with _market_index_lock:
-            _market_index_history_cache[cache_key] = {
-                "updated_at": _utc_now(),
-                "rows": list(clipped_rows),
-                "synced_at": synced_at,
-            }
-
-        return list(clipped_rows), synced_at, f"vnstock-{definition['vnstock_symbol'].lower()}"
-    except BaseException as exc:
-        logger.warning("Failed to fetch market index history for %s: %s", index_symbol, exc)
-
-    async with _market_index_lock:
-        stale = _market_index_history_cache.get(cache_key)
-        if stale:
-            return list(stale.get("rows", [])), stale.get("synced_at"), "memory-market-index-cache-stale"
-
-    return [], None, "vnstock-market-index-unavailable"
+    del start_date, end_date
+    rows = _load_market_index_history_from_lake(index_symbol, safe_limit)
+    if rows:
+        return rows, _utc_now().isoformat(), "lake-gold-market-features"
+    return [], None, "snapshot-market-index-missing"
 
 
 def _build_market_index_quote(index_symbol: str, history_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -209,19 +173,23 @@ async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=50),
     refresh: bool = Query(default=False, description="Force refresh index prices from vnstock"),
 ) -> dict[str, Any]:
-    target_symbols = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+    reject_refresh_in_snapshot_mode(refresh)
+    safe_limit = int(limit) if isinstance(limit, int) else 10
+    target_symbols = MARKET_INDEX_ORDER[: min(safe_limit, len(MARKET_INDEX_ORDER))]
 
     index_rows: list[dict[str, Any]] = []
     source_parts: set[str] = set()
     synced_at_values: list[str] = []
+    has_data = False
     for index_symbol in target_symbols:
         history_rows, synced_at, data_source = await _get_market_index_history_rows(
             index_symbol=index_symbol,
             start_date=start_date,
             end_date=end_date,
-            limit=max(3, min(120, limit * 10)),
+            limit=max(3, min(120, safe_limit * 10)),
             refresh=refresh,
         )
+        has_data = has_data or bool(history_rows)
         index_rows.append(_build_market_index_quote(index_symbol=index_symbol, history_rows=history_rows))
         source_parts.add(data_source)
         if synced_at:
@@ -230,8 +198,9 @@ async def get_market_indices(
     return {
         "count": len(index_rows),
         "data": index_rows,
-        "source": "+".join(sorted(source_parts)) if source_parts else "vnstock-market-index-unavailable",
+        "source": "+".join(sorted(source_parts)) if source_parts else "snapshot-market-index-missing",
         "last_synced_at": max(synced_at_values) if synced_at_values else None,
+        "data_status": DATA_AVAILABLE if has_data else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -243,12 +212,14 @@ async def get_market_index_history(
     limit: int = Query(default=365, ge=30, le=5000),
     refresh: bool = Query(default=False, description="Force refresh index history from vnstock"),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
+    safe_limit = int(limit) if isinstance(limit, int) else 365
     normalized = _normalize_market_index_symbol(index_symbol)
     history_rows, synced_at, source = await _get_market_index_history_rows(
         index_symbol=normalized,
         start_date=start_date,
         end_date=end_date,
-        limit=limit,
+        limit=safe_limit,
         refresh=refresh,
     )
 
@@ -260,6 +231,7 @@ async def get_market_index_history(
         "data": history_rows,
         "source": source,
         "last_synced_at": synced_at,
+        "data_status": DATA_AVAILABLE if history_rows else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -269,27 +241,31 @@ async def get_news(
     limit: int = Query(default=24, ge=1, le=200),
     refresh: bool = Query(default=False),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
+    safe_limit = int(limit) if isinstance(limit, int) else 24
     target = parse_symbols_query(symbols, fallback=VN30_SYMBOLS[:8])
     merged: list[dict[str, Any]] = []
     synced_at_values: list[str] = []
 
     for symbol in target:
-        items, synced_at = await fundamental_service.get_symbol_news(symbol, refresh=refresh)
+        items, synced_at = await _load_symbol_payload_cache(NewsCache, symbol, max_age_seconds=None)
+        items = items if isinstance(items, list) else []
         merged.extend(items)
         if synced_at:
             synced_at_values.append(synced_at)
 
     merged.sort(key=lambda item: item.get("publish_time") or "", reverse=True)
-    clipped = merged[:limit]
+    clipped = merged[:safe_limit]
 
     return {
         "count": len(clipped),
         "symbols": target,
         "data": clipped,
         "cached_at": _utc_now().isoformat(),
-        "source": "mysql-cache+vnstock-company-news",
+        "source": "mysql-news-cache",
         "last_synced_at": max(synced_at_values) if synced_at_values else None,
-        "limit": limit,
+        "limit": safe_limit,
+        "data_status": DATA_AVAILABLE if clipped else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -342,11 +318,12 @@ async def get_google_news(
     symbols: Optional[str] = Query(default=None),
     limit: int = Query(default=24, ge=1, le=200),
 ) -> dict[str, Any]:
+    safe_limit = int(limit) if isinstance(limit, int) else 24
     target = parse_symbols_query(symbols, fallback=VN30_SYMBOLS[:8])
     merged: list[dict[str, Any]] = []
     synced_at_values: list[str] = []
 
-    per_symbol_limit = max(limit, 1)
+    per_symbol_limit = max(safe_limit, 1)
     for symbol in target:
         items, synced_at = _load_latest_google_news(symbol, per_symbol_limit)
         merged.extend(items)
@@ -354,7 +331,7 @@ async def get_google_news(
             synced_at_values.append(synced_at)
 
     merged.sort(key=lambda item: item.get("publish_time") or "", reverse=True)
-    clipped = merged[:limit]
+    clipped = merged[:safe_limit]
 
     return {
         "count": len(clipped),
@@ -363,7 +340,8 @@ async def get_google_news(
         "cached_at": _utc_now().isoformat(),
         "source": "lake-raw-google-news",
         "last_synced_at": max(synced_at_values) if synced_at_values else None,
-        "limit": limit,
+        "limit": safe_limit,
+        "data_status": DATA_AVAILABLE if clipped else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -373,12 +351,15 @@ async def get_events(
     limit: int = Query(default=24, ge=1, le=200),
     refresh: bool = Query(default=False),
 ) -> dict[str, Any]:
+    reject_refresh_in_snapshot_mode(refresh)
+    safe_limit = int(limit) if isinstance(limit, int) else 24
     target = parse_symbols_query(symbols, fallback=VN30_SYMBOLS[:8])
     merged: list[dict[str, Any]] = []
     synced_at_values: list[str] = []
 
     for symbol in target:
-        items, synced_at = await fundamental_service.get_symbol_events(symbol, refresh=refresh)
+        items, synced_at = await _load_symbol_payload_cache(EventsCache, symbol, max_age_seconds=None)
+        items = items if isinstance(items, list) else []
         merged.extend(items)
         if synced_at:
             synced_at_values.append(synced_at)
@@ -389,14 +370,15 @@ async def get_events(
 
     future_events.sort(key=lambda item: item.get("date") or "")
     past_events.sort(key=lambda item: item.get("date") or "", reverse=True)
-    clipped = (future_events + past_events)[:limit]
+    clipped = (future_events + past_events)[:safe_limit]
 
     return {
         "count": len(clipped),
         "symbols": target,
         "data": clipped,
         "cached_at": _utc_now().isoformat(),
-        "source": "mysql-cache+vnstock-company-events",
+        "source": "mysql-events-cache",
         "last_synced_at": max(synced_at_values) if synced_at_values else None,
-        "limit": limit,
+        "limit": safe_limit,
+        "data_status": DATA_AVAILABLE if clipped else NO_DATA_IN_SNAPSHOT,
     }

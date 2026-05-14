@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from src.api.auth import require_role
 from src.database.models import User
-from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service, parse_symbols_query
+from src.market_data_status import reject_refresh_in_snapshot_mode
+from src.services.vnstock_fetcher import fetcher_service
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ async def save_quotes(
     quotes: list[SaveQuotePayload],
     _: User = Depends(require_role("admin")),
 ) -> dict[str, int]:
+    # Explicit admin/manual ingestion remains allowed; read APIs must not call this path.
     if not quotes:
         return {"saved": 0}
 
@@ -58,21 +60,6 @@ async def debug_refresh_intraday(
     cache_limit: int = Query(default=240, ge=1, le=2000),
     _: User = Depends(require_role("admin")),
 ) -> dict[str, Any]:
-    target_symbols = parse_symbols_query(symbols, fallback=VN30_SYMBOLS)
-    updated = await fetcher_service.refresh_symbols_once(target_symbols, ignore_session=force)
-    cache_payload = fetcher_service.get_intraday_cache_view(symbols=target_symbols, limit=cache_limit)
-    per_symbol_tick_counts = {
-        symbol: len(cache_payload.get(symbol, []))
-        for symbol in target_symbols
-    }
-
-    return {
-        "count": len(target_symbols),
-        "symbols": target_symbols,
-        "updated_symbols": updated,
-        "forced": force,
-        "is_in_session": fetcher_service.is_intraday_fetch_window(),
-        "last_synced_at": fetcher_service.last_intraday_sync_at,
-        "total_ticks": sum(per_symbol_tick_counts.values()),
-        "per_symbol_tick_counts": per_symbol_tick_counts,
-    }
+    del symbols, force, cache_limit, _
+    reject_refresh_in_snapshot_mode(True)
+    return {}

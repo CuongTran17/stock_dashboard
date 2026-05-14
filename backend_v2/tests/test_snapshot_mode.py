@@ -101,5 +101,25 @@ class StockReadApiSnapshotModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"], [])
 
 
+class MarketAndInternalSnapshotModeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_market_indices_refresh_is_rejected(self):
+        from src.routes.market import get_market_indices
+
+        with self.assertRaises(HTTPException) as ctx:
+            await get_market_indices(refresh=True)
+
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail["code"], "REFRESH_DISABLED_IN_SNAPSHOT_MODE")
+
+    async def test_debug_intraday_refresh_is_rejected(self):
+        from src.routes.internal import debug_refresh_intraday
+
+        with self.assertRaises(HTTPException) as ctx:
+            await debug_refresh_intraday(symbols="FPT")
+
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertEqual(ctx.exception.detail["code"], "REFRESH_DISABLED_IN_SNAPSHOT_MODE")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,6 @@ Provides the AI-powered stock analysis endpoint backed by the Kaggle Trading-R1 
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -15,11 +14,10 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.cache import _load_technical_cache
+from src.cache import _load_financial_report_cache, _load_symbol_payload_cache, _load_technical_cache
 from src.database.db import AsyncSessionLocal
-from src.database.models import AIPrediction
-from src.routes.stocks import _ensure_history_data
-from src.services.fundamental_fetcher import fundamental_service
+from src.database.models import AIPrediction, CompanyOverviewCache, NewsCache
+from src.routes.stocks import _load_history_data
 from src.services.vnstock_fetcher import VN30_SYMBOLS, fetcher_service
 from src.settings import get_settings
 from src.utils import _extract_valuation_from_ratios, _to_float
@@ -135,7 +133,7 @@ async def generate_analysis(
         market_cap = snapshot.get("marketCap", "N/A")
 
         # 1.5. Get historical data from DB (last 30 days)
-        history = await _ensure_history_data(symbol, start_date=None, end_date=None, limit=30)
+        history = await _load_history_data(symbol, start_date=None, end_date=None, limit=30)
         price_trend = ""
         history_summary = f"Historical data: {len(history) if history else 0} days loaded"
 
@@ -210,11 +208,12 @@ TECHNICAL ANALYSIS:
         overview_data = "FUNDAMENTALS: Not available"
         news_data = "RECENT NEWS: Not available"
         try:
-            (overview_payload, _), (ratio_records, _), (news_list, _) = await asyncio.gather(
-                fundamental_service.refresh_company_overview(symbol),
-                fundamental_service.refresh_financial_report(symbol, "ratios"),
-                fundamental_service.get_symbol_news(symbol, refresh=False),
-            )
+            overview_payload, _ = await _load_symbol_payload_cache(CompanyOverviewCache, symbol, max_age_seconds=None)
+            ratio_records, _ = await _load_financial_report_cache(symbol, "ratios", max_age_seconds=None)
+            news_list, _ = await _load_symbol_payload_cache(NewsCache, symbol, max_age_seconds=None)
+            overview_payload = overview_payload if isinstance(overview_payload, dict) else {}
+            ratio_records = ratio_records if isinstance(ratio_records, list) else []
+            news_list = news_list if isinstance(news_list, list) else []
 
             profile = overview_payload if isinstance(overview_payload, dict) else {}
             valuation = _extract_valuation_from_ratios(ratio_records or [])
@@ -336,7 +335,7 @@ Format your response as JSON with keys: decision, confidence, conclusion
                 "price_change_pct": price_change_pct,
                 "volume": volume,
                 "days_analyzed": len(history) if history else 0,
-                "data_source": "MySQL (history) + vnstock (live) + Kaggle Trading-R1 (analysis)",
+                "data_source": "snapshot/mysql-cache + Kaggle Trading-R1 (analysis)",
             },
             "model_version": "Trading-R1/Qwen3.5-2B",
         }
