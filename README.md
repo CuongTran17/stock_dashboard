@@ -11,7 +11,8 @@ Frontend Vue 3 + TypeScript + Tailwind CSS + Vite
         v
 Backend FastAPI + APScheduler
         |
-        +-- MySQL: application tables + cache tables
+        +-- MySQL: user/app/business tables + JSON cache tables
+        +-- DuckDB: durable stock OHLCV warehouse
         +-- Redis: optional realtime tick cache
         +-- Data Lake: raw / processed / gold parquet
         +-- ETL: Extract -> Validate/Transform -> Load
@@ -71,6 +72,7 @@ Tạo `backend_v2\.env` từ `backend_v2\.env.example`, rồi cấu hình các b
 # Database
 MYSQL_URL=mysql+mysqlconnector://root:YOUR_PASSWORD@localhost/vnstock_data
 MYSQL_ASYNC_URL=mysql+aiomysql://root:YOUR_PASSWORD@localhost/vnstock_data
+DUCKDB_PATH=lake/warehouse/market.duckdb
 DB_MIGRATIONS_ENABLED=true
 DB_LEGACY_AUTO_DDL=true
 
@@ -157,7 +159,7 @@ URL mặc định:
 
 Backend không đọc `os.getenv` rải rác trong route/service nữa. Các nhóm cấu hình chính nằm trong `Settings`:
 
-- Database: `MYSQL_URL`, `MYSQL_ASYNC_URL`, migration flags
+- Database: `MYSQL_URL`, `MYSQL_ASYNC_URL`, `DUCKDB_PATH`, migration flags
 - Auth: `JWT_SECRET`, `JWT_EXPIRE_HOURS`
 - URL/CORS: `FRONTEND_URL`, `BACKEND_URL`, callback URL
 - Redis: `REDIS_URL`
@@ -278,13 +280,14 @@ Module chính:
 - `lake/processed/by_symbol/<SYMBOL>/latest.parquet`
 - `lake/processed/runs/<run_id>.json`
 - Gold layer theo partition để phục vụ đọc nhanh
-- MySQL cache/application tables:
+- DuckDB market warehouse:
   - `daily_ohlcv`
+  - `technical_cache`
+- MySQL cache/application tables:
   - `company_overview_cache`
   - `financial_report_cache`
   - `news_cache`
   - `events_cache`
-  - `technical_cache`
 
 Module chính:
 
@@ -306,7 +309,8 @@ Runtime invariants:
 
 Short-term serving:
 
-- MySQL cache tables serve stock/market APIs.
+- DuckDB serves daily OHLCV history and snapshot fallback.
+- MySQL cache tables continue serving company overview, financial, news, and events data.
 - `lake/processed` and `lake/gold` remain the source of truth and audit trail.
 - User/app data remains in MySQL.
 
@@ -398,7 +402,7 @@ Tab này hiển thị:
 - Mô tả rõ 3 phase Extract, Transform, Load
 - Nhóm cột dữ liệu: identity, price, technical, fundamental, macro, news, quality
 - Quality summary: outlier count, duplicate rows, missing columns
-- Load targets: parquet, by-symbol parquet, gold layer, MySQL cache tables
+- Load targets: parquet, by-symbol parquet, gold layer, DuckDB OHLCV warehouse, MySQL cache tables
 - Lịch sử ETL runs
 - Nút trigger ETL thủ công cho admin, có confirm và rate limit phía backend
 
@@ -552,10 +556,10 @@ tailadmin-vuejs-1.0.0/
 | Bảng | Mục đích |
 |---|---|
 | `alembic_version` | Version schema migration |
-| `daily_ohlcv` | OHLCV ngày |
+| `daily_ohlcv` | OHLCV ngày, stored in DuckDB |
 | `company_overview_cache` | Cache tổng quan doanh nghiệp |
 | `financial_report_cache` | Cache báo cáo tài chính |
-| `technical_cache` | Cache chỉ báo kỹ thuật |
+| `technical_cache` | Cache chỉ báo kỹ thuật, stored in DuckDB |
 | `news_cache` | Cache tin tức |
 | `events_cache` | Cache sự kiện |
 | `users` | Tài khoản |

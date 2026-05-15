@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from etl.config import FUNDAMENTAL_REPORT_TYPES, EtlConfig
+from etl.load_to_duckdb import load_daily_price_to_duckdb, load_eod_rows_to_duckdb, load_technical_cache_to_duckdb
 from etl.processed_files import latest_processed_parquet
-from backend_v2.src.services.technical_indicators import build_technical_payload
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
@@ -72,75 +72,13 @@ def _latest_processed_parquet(cfg: EtlConfig | None = None) -> Path | None:
 
 
 def load_daily_price(cfg: EtlConfig | None = None, dataset: pd.DataFrame | None = None) -> int:
-    engine = get_engine()
-    if dataset is None:
-        latest_file = _latest_processed_parquet(cfg)
-        if not latest_file:
-            log.error("No parquet files found in processed dir")
-            return 0
-        log.info("Loading prices from: %s", latest_file)
-        dataset = pd.read_parquet(latest_file)
-
-    ohlcv_cols = ["symbol", "data_date", "open_price", "high_price", "low_price", "close_price", "volume"]
-    if not all(col in dataset.columns for col in ohlcv_cols):
-        log.error("Missing required OHLCV columns in dataset")
-        return 0
-
-    df = dataset[ohlcv_cols].copy()
-    df = df.rename(
-        columns={
-            "data_date": "date",
-            "open_price": "open",
-            "high_price": "high",
-            "low_price": "low",
-            "close_price": "close",
-        }
-    )
-    for col in ("open", "high", "low", "close"):
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0).astype(int)
-    records = df.to_dict(orient="records")
-    if not records:
-        return 0
-
-    upsert_sql = text(
-        """
-        INSERT INTO daily_ohlcv (symbol, date, open, high, low, close, volume)
-        VALUES (:symbol, :date, :open, :high, :low, :close, :volume)
-        ON DUPLICATE KEY UPDATE
-            open = VALUES(open),
-            high = VALUES(high),
-            low = VALUES(low),
-            close = VALUES(close),
-            volume = VALUES(volume)
-        """
-    )
-    with engine.begin() as conn:
-        conn.execute(upsert_sql, records)
-    log.info("Loaded %d daily OHLCV rows", len(records))
-    return len(records)
+    log.warning("load_daily_price() now writes daily OHLCV to DuckDB, not MySQL.")
+    return load_daily_price_to_duckdb(cfg=cfg, dataset=dataset)
 
 
 def load_eod_rows(rows: list[dict[str, Any]]) -> int:
-    if not rows:
-        return 0
-    engine = get_engine()
-    upsert_sql = text(
-        """
-        INSERT INTO daily_ohlcv (symbol, date, open, high, low, close, volume)
-        VALUES (:symbol, :date, :open, :high, :low, :close, :volume)
-        ON DUPLICATE KEY UPDATE
-            open = VALUES(open),
-            high = VALUES(high),
-            low = VALUES(low),
-            close = VALUES(close),
-            volume = VALUES(volume)
-        """
-    )
-    with engine.begin() as conn:
-        conn.execute(upsert_sql, rows)
-    log.info("Loaded %d aggregated EOD rows", len(rows))
-    return len(rows)
+    log.warning("load_eod_rows() now writes aggregated EOD rows to DuckDB, not MySQL.")
+    return load_eod_rows_to_duckdb(rows)
 
 
 def load_overview_cache(cfg: EtlConfig) -> int:
@@ -243,74 +181,9 @@ def load_events_cache(cfg: EtlConfig) -> int:
     return _load_symbol_list_cache(cfg, "events", "events_cache", "etl-vnstock-events")
 
 
-def _technical_payload_from_processed(symbol: str, frame: pd.DataFrame) -> dict[str, Any]:
-    frame = frame.sort_values("data_date").reset_index(drop=True)
-    return build_technical_payload(
-        symbol,
-        frame,
-        time_col="data_date",
-        open_col="open_price",
-        high_col="high_price",
-        low_col="low_price",
-        close_col="close_price",
-        volume_col="volume",
-    )
-
-
 def load_technical_cache(cfg: EtlConfig, dataset: pd.DataFrame | None = None, limit: int = 365) -> int:
-    engine = get_engine()
-    if dataset is None:
-        latest_file = _latest_processed_parquet(cfg)
-        if not latest_file:
-            return 0
-        dataset = pd.read_parquet(latest_file)
-
-    records = []
-    for symbol, frame in dataset.groupby("symbol"):
-        frame = frame.sort_values("data_date").tail(limit)
-        payload = _technical_payload_from_processed(str(symbol).upper(), frame)
-        records.append(
-            {
-                "symbol": str(symbol).upper(),
-                "start_date": None,
-                "end_date": None,
-                "limit_value": limit,
-                "history_count": len(frame),
-                "history_last_time": str(frame["data_date"].iloc[-1]) if not frame.empty else None,
-                "payload_json": _json_dumps(payload),
-                "source": "etl-processed",
-            }
-        )
-    if not records:
-        return 0
-    delete_sql = text(
-        """
-        DELETE FROM technical_cache
-        WHERE symbol = :symbol
-          AND start_date IS NULL
-          AND end_date IS NULL
-          AND limit_value = :limit_value
-        """
-    )
-    sql = text(
-        """
-        INSERT INTO technical_cache
-            (symbol, start_date, end_date, limit_value, history_count, history_last_time, payload_json, source, updated_at)
-        VALUES
-            (:symbol, :start_date, :end_date, :limit_value, :history_count, :history_last_time, :payload_json, :source, CURRENT_TIMESTAMP)
-        ON DUPLICATE KEY UPDATE
-            history_count=VALUES(history_count),
-            history_last_time=VALUES(history_last_time),
-            payload_json=VALUES(payload_json),
-            source=VALUES(source),
-            updated_at=CURRENT_TIMESTAMP
-        """
-    )
-    with engine.begin() as conn:
-        conn.execute(delete_sql, [{"symbol": row["symbol"], "limit_value": row["limit_value"]} for row in records])
-        conn.execute(sql, records)
-    log.info("Loaded %d technical cache rows", len(records))
-    return len(records)
+    log.warning("load_technical_cache() now writes technical cache to DuckDB, not MySQL.")
+    return load_technical_cache_to_duckdb(cfg=cfg, dataset=dataset, limit=limit)
 
 
 def load_all(cfg: EtlConfig, dataset: pd.DataFrame | None = None) -> dict[str, int]:
@@ -318,14 +191,12 @@ def load_all(cfg: EtlConfig, dataset: pd.DataFrame | None = None) -> dict[str, i
         latest_file = _latest_processed_parquet(cfg)
         dataset = pd.read_parquet(latest_file) if latest_file else None
     results = {
-        "daily_ohlcv": load_daily_price(cfg, dataset),
         "overview": load_overview_cache(cfg),
         "financial": load_financial_cache(cfg),
         "news": load_news_cache(cfg),
         "events": load_events_cache(cfg),
-        "technical": load_technical_cache(cfg, dataset),
     }
-    log.info("MySQL load_all results: %s", results)
+    log.info("MySQL cache load_all results: %s", results)
     return results
 
 

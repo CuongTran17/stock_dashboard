@@ -232,7 +232,7 @@ async def get_history(
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
     limit: int = Query(default=365, ge=1, le=5000),
-    refresh: bool = Query(default=False, description="Force refresh historical data from vnstock before reading MySQL"),
+    refresh: bool = Query(default=False, description="Force refresh historical data from vnstock before reading DuckDB"),
 ) -> dict[str, Any]:
     reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
@@ -242,7 +242,7 @@ async def get_history(
         "symbol": normalized,
         "count": len(records),
         "data": records,
-        "source": "mysql",
+        "source": "duckdb",
         "last_synced_at": fetcher_service.last_history_sync_at.get(normalized),
         "data_status": DATA_AVAILABLE if records else NO_DATA_IN_SNAPSHOT,
     }
@@ -338,7 +338,7 @@ async def get_technical(
             "ohlcv": {"time": [], "open": [], "high": [], "low": [], "close": [], "volume": []},
             "indicators": {},
             "signals": {},
-            "source": "mysql",
+            "source": "duckdb",
             "last_synced_at": None,
             "data_status": NO_DATA_IN_SNAPSHOT,
         }
@@ -361,7 +361,7 @@ async def get_technical(
             and _row_is_fresh(cached_row.updated_at, TECHNICAL_CACHE_TTL_SECONDS)
         ):
             payload = dict(cached_payload)
-            payload["source"] = "mysql-technical-cache"
+            payload["source"] = "duckdb-technical-cache"
             payload["last_synced_at"] = fetcher_service.last_history_sync_at.get(normalized) or _row_iso_timestamp(cached_row.updated_at)
             payload["data_status"] = DATA_AVAILABLE
             return payload
@@ -376,7 +376,7 @@ async def get_technical(
         history_last_time=history_last_time,
         payload=payload,
     )
-    payload["source"] = "mysql"
+    payload["source"] = "duckdb"
     payload["last_synced_at"] = fetcher_service.last_history_sync_at.get(normalized) or technical_synced_at
     payload["data_status"] = DATA_AVAILABLE
     return payload

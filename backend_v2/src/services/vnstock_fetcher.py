@@ -6,13 +6,10 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import select
-from sqlalchemy.dialects.mysql import insert as mysql_insert
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.database.data_lake import dump_ticks_to_parquet
-from src.database.db import AsyncSessionLocal, SessionLocal
-from src.database.models import DailyOHLCV
+from src.database.market_duckdb import market_repo
 from src.database.redis_db import get_redis
 from src.services.vnstock_error_utils import extract_retry_after_seconds, is_rate_limit_error
 from src.services.vnstock_rate_limiter import vnstock_rate_limiter
@@ -499,38 +496,7 @@ class VnstockFetcherService:
     def _upsert_daily_rows_sync(self, symbol: str, rows: List[Dict[str, Any]]) -> int:
         if not rows:
             return 0
-
-        db = SessionLocal()
-        try:
-            payload_rows = [
-                {
-                    "symbol": symbol,
-                    "date": row["date"],
-                    "open": row["open"],
-                    "high": row["high"],
-                    "low": row["low"],
-                    "close": row["close"],
-                    "volume": row["volume"],
-                    "created_at": datetime.now(timezone.utc),
-                }
-                for row in rows
-            ]
-            stmt = mysql_insert(DailyOHLCV).values(payload_rows)
-            stmt = stmt.on_duplicate_key_update(
-                open=stmt.inserted.open,
-                high=stmt.inserted.high,
-                low=stmt.inserted.low,
-                close=stmt.inserted.close,
-                volume=stmt.inserted.volume,
-            )
-            db.execute(stmt)
-            db.commit()
-            return len(payload_rows)
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        return market_repo.upsert_daily_rows(symbol, rows)
 
     async def refresh_history_for_symbol(
         self,
@@ -611,30 +577,12 @@ class VnstockFetcherService:
         if not is_vn30_symbol(normalized):
             return []
 
-        safe_limit = max(limit, 1)
-        db = SessionLocal()
-        try:
-            query = db.query(DailyOHLCV).filter(DailyOHLCV.symbol == normalized)
-            if start_date:
-                query = query.filter(DailyOHLCV.date >= start_date)
-            if end_date:
-                query = query.filter(DailyOHLCV.date <= end_date)
-
-            records = query.order_by(DailyOHLCV.date.desc()).limit(safe_limit).all()
-            records = list(reversed(records))
-            return [
-                {
-                    "time": item.date.isoformat(),
-                    "open": float(item.open),
-                    "high": float(item.high),
-                    "low": float(item.low),
-                    "close": float(item.close),
-                    "volume": int(item.volume),
-                }
-                for item in records
-            ]
-        finally:
-            db.close()
+        return market_repo.load_history(
+            normalized,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
 
     async def load_history_from_db_async(
         self,
@@ -647,27 +595,13 @@ class VnstockFetcherService:
         if not is_vn30_symbol(normalized):
             return []
 
-        safe_limit = max(limit, 1)
-        async with AsyncSessionLocal() as db:
-            query = select(DailyOHLCV).where(DailyOHLCV.symbol == normalized)
-            if start_date:
-                query = query.where(DailyOHLCV.date >= start_date)
-            if end_date:
-                query = query.where(DailyOHLCV.date <= end_date)
-
-            result = await db.execute(query.order_by(DailyOHLCV.date.desc()).limit(safe_limit))
-            records = list(reversed(result.scalars().all()))
-            return [
-                {
-                    "time": item.date.isoformat(),
-                    "open": float(item.open),
-                    "high": float(item.high),
-                    "low": float(item.low),
-                    "close": float(item.close),
-                    "volume": int(item.volume),
-                }
-                for item in records
-            ]
+        return await asyncio.to_thread(
+            self.load_history_from_db,
+            normalized,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
 
     async def ingest_realtime_quotes(self, quotes: List[Dict[str, Any]]) -> int:
         saved = 0
@@ -794,76 +728,62 @@ class VnstockFetcherService:
 
     def aggregate_today_intraday_to_daily(self) -> int:
         today = datetime.now(tz=VN_TZ).date()
-        db = SessionLocal()
         payload_rows: list[dict[str, Any]] = []
 
-        try:
-            redis_client = get_redis()
-            for symbol in VN30_SYMBOLS:
-                if redis_client:
-                    raw = redis_client.lrange(f"intraday:{symbol}", 0, -1)
-                    symbol_ticks = [json.loads(x) for x in raw]
-                    # Dump data lake parquet backup
-                    dump_ticks_to_parquet(symbol, symbol_ticks)
-                else:
-                    symbol_ticks = list(self._intraday_mem.get(symbol, []))
-                ticks = [
-                    tick for tick in symbol_ticks
-                    if _to_date(tick.get("time")) == today
-                ]
-                if not ticks:
-                    continue
-
-                ticks.sort(key=lambda item: item.get("time", ""))
-                prices = [_to_float(tick.get("price")) for tick in ticks if _to_float(tick.get("price")) > 0]
-                if not prices:
-                    continue
-
-                open_price = prices[0]
-                close_price = prices[-1]
-                high_price = max(prices)
-                low_price = min(prices)
-                volume = sum(_to_int(tick.get("volume")) for tick in ticks)
-
-                payload_rows.append(
-                    {
-                        "symbol": symbol,
-                        "date": today,
-                        "open": open_price,
-                        "high": high_price,
-                        "low": low_price,
-                        "close": close_price,
-                        "volume": volume,
-                        "created_at": datetime.now(timezone.utc),
-                    }
-                )
-
-            if not payload_rows:
-                db.commit()
-                return 0
-            
-            # Clear intraday cache for new day
+        redis_client = get_redis()
+        for symbol in VN30_SYMBOLS:
             if redis_client:
-                for symbol in VN30_SYMBOLS:
-                    redis_client.delete(f"intraday:{symbol}")
+                raw = redis_client.lrange(f"intraday:{symbol}", 0, -1)
+                symbol_ticks = [json.loads(x) for x in raw]
+                # Dump data lake parquet backup
+                dump_ticks_to_parquet(symbol, symbol_ticks)
+            else:
+                symbol_ticks = list(self._intraday_mem.get(symbol, []))
+            ticks = [
+                tick for tick in symbol_ticks
+                if _to_date(tick.get("time")) == today
+            ]
+            if not ticks:
+                continue
 
-            stmt = mysql_insert(DailyOHLCV).values(payload_rows)
-            stmt = stmt.on_duplicate_key_update(
-                open=stmt.inserted.open,
-                high=stmt.inserted.high,
-                low=stmt.inserted.low,
-                close=stmt.inserted.close,
-                volume=stmt.inserted.volume,
+            ticks.sort(key=lambda item: item.get("time", ""))
+            prices = [_to_float(tick.get("price")) for tick in ticks if _to_float(tick.get("price")) > 0]
+            if not prices:
+                continue
+
+            open_price = prices[0]
+            close_price = prices[-1]
+            high_price = max(prices)
+            low_price = min(prices)
+            volume = sum(_to_int(tick.get("volume")) for tick in ticks)
+
+            payload_rows.append(
+                {
+                    "symbol": symbol,
+                    "date": today,
+                    "open": open_price,
+                    "high": high_price,
+                    "low": low_price,
+                    "close": close_price,
+                    "volume": volume,
+                    "created_at": datetime.now(timezone.utc),
+                }
             )
-            db.execute(stmt)
 
-            db.commit()
-            return len(payload_rows)
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        if not payload_rows:
+            return 0
+
+        affected = 0
+        for symbol in VN30_SYMBOLS:
+            symbol_rows = [row for row in payload_rows if row["symbol"] == symbol]
+            affected += market_repo.upsert_daily_rows(symbol, symbol_rows)
+
+        # Clear intraday cache for new day only after durable DuckDB writes.
+        if redis_client:
+            for symbol in VN30_SYMBOLS:
+                redis_client.delete(f"intraday:{symbol}")
+
+        return affected
 
     def stop(self) -> None:
         self._stop_event.set()

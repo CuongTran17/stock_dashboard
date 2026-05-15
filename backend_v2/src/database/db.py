@@ -87,7 +87,6 @@ def _ensure_payload_columns_longtext() -> None:
     statements = [
         "ALTER TABLE company_overview_cache MODIFY COLUMN payload_json LONGTEXT NOT NULL",
         "ALTER TABLE financial_report_cache MODIFY COLUMN payload_json LONGTEXT NOT NULL",
-        "ALTER TABLE technical_cache MODIFY COLUMN payload_json LONGTEXT NOT NULL",
         "ALTER TABLE news_cache MODIFY COLUMN payload_json LONGTEXT NOT NULL",
         "ALTER TABLE events_cache MODIFY COLUMN payload_json LONGTEXT NOT NULL",
     ]

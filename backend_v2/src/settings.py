@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     mysql_url: str = "mysql+mysqlconnector://root:@localhost/vnstock_data"
     mysql_async_url: str | None = None
+    duckdb_path: str = "lake/warehouse/market.duckdb"
     db_migrations_enabled: bool = True
     db_legacy_auto_ddl: bool = True
 
