@@ -386,6 +386,7 @@ import { isPremium } from '@/services/authApi'
 import { VN30_TICKERS } from '@/composables/useStockData'
 import {
   stockBackendApi,
+  type AiAnalysisResponse,
   type HistoricalRecord,
   type MarketEventItem,
   type MarketNewsItem,
@@ -1670,6 +1671,38 @@ async function refreshAll(forceRefresh: boolean = true, notify: boolean = true):
   }
 }
 
+function handleAnalysisJobFailure(message: string): void {
+  status.value = 'connected'
+  loadingMessage.value = ''
+  showAlert(message, 'error')
+}
+
+async function pollAnalysisJob(jobId: string): Promise<AiAnalysisResponse> {
+  const started = Date.now()
+  const timeoutMs = 180000
+
+  while (Date.now() - started < timeoutMs) {
+    const job = await stockBackendApi.getAnalysisJob(jobId)
+    if (job.status === 'success' && job.result && 'decision' in job.result) {
+      return job.result as AiAnalysisResponse
+    }
+    if (job.status === 'failed') {
+      const message = job.error_message || 'AI analysis job failed'
+      handleAnalysisJobFailure(message)
+      throw new Error(message)
+    }
+
+    loadingMessage.value =
+      job.status === 'queued'
+        ? 'AI job dang cho xu ly...'
+        : 'AI job dang chay mo hinh Trading-R1...'
+    await new Promise((resolve) => window.setTimeout(resolve, 1500))
+  }
+
+  handleAnalysisJobFailure('AI analysis job timed out')
+  throw new Error('AI analysis job timed out')
+}
+
 async function generateAnalysis(notify: boolean): Promise<void> {
   if (isAnalyzing.value) {
     return
@@ -1680,57 +1713,33 @@ async function generateAnalysis(notify: boolean): Promise<void> {
   loadingMessage.value = 'Đang phân tích dữ liệu kỹ thuật và tin tức...'
 
   try {
-    // Call Kaggle Trading-R1 API from backend_v2
-    const apiUrl = `${BACKEND_FALLBACK}/api/analysis/${selectedSymbol.value}/generate`
-    
     try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      
-      if (response.ok) {
-        const aiResult = await response.json()
-        
-        // Build local analysis with AI data
-        const localAnalysis = buildAnalysis()
-        const rawKaggleOutput = String(
-          aiResult.raw_output ||
-          aiResult.rawOutput ||
-          aiResult.reasoning ||
-          aiResult.conclusion ||
-          ''
-        )
-        const apiKeyFactors = Array.isArray(aiResult.key_factors)
-          ? aiResult.key_factors.map((item: unknown) => String(item).trim()).filter(Boolean)
-          : []
-        const parsedKeyFactors = apiKeyFactors.length > 0 ? apiKeyFactors : extractKeyFactors(rawKaggleOutput)
-        
-        // Override with AI decision if available
-        if (aiResult.decision) {
-          localAnalysis.decision = aiResult.decision as Decision
-          localAnalysis.confidence = normalizeConfidencePercent(aiResult.confidence, localAnalysis.confidence)
-          localAnalysis.rawOutput = rawKaggleOutput
-          localAnalysis.full = rawKaggleOutput
-            ? buildKaggleFullBullets(rawKaggleOutput, localAnalysis.decision, localAnalysis.confidence, parsedKeyFactors)
-            : `[AI] ${aiResult.reasoning || localAnalysis.full}`
-          localAnalysis.technical = extractTaggedSection(rawKaggleOutput, 'TechnicalAnalysis') || localAnalysis.technical
-          localAnalysis.fundamental = extractTaggedSection(rawKaggleOutput, 'Fundamentals') || localAnalysis.fundamental
-          localAnalysis.sentiment = extractTaggedSection(rawKaggleOutput, 'NewsSentiment') || localAnalysis.sentiment
-          localAnalysis.conclusion = extractTaggedSection(rawKaggleOutput, 'Conclusion') || aiResult.reasoning || localAnalysis.conclusion
-          localAnalysis.factors = parsedKeyFactors.length > 0 ? parsedKeyFactors : localAnalysis.factors
-          localAnalysis.model = `${aiResult.model_version || 'Trading-R1'} + Local TA`
-        }
-        
-        analysis.value = localAnalysis
-      } else {
-        // Fallback to local analysis if API fails
-        analysis.value = buildAnalysis()
-      }
+      const job = await stockBackendApi.enqueueAnalysis(selectedSymbol.value, true)
+      const aiResult = await pollAnalysisJob(job.job_id)
+      const localAnalysis = buildAnalysis()
+      const rawKaggleOutput = String(aiResult.raw_output || aiResult.reasoning || '')
+      const parsedKeyFactors = aiResult.key_factors.length > 0
+        ? aiResult.key_factors
+        : extractKeyFactors(rawKaggleOutput)
+
+      localAnalysis.decision = aiResult.decision as Decision
+      localAnalysis.confidence = normalizeConfidencePercent(aiResult.confidence, localAnalysis.confidence)
+      localAnalysis.rawOutput = rawKaggleOutput
+      localAnalysis.full = rawKaggleOutput
+        ? buildKaggleFullBullets(rawKaggleOutput, localAnalysis.decision, localAnalysis.confidence, parsedKeyFactors)
+        : `[AI] ${aiResult.reasoning || localAnalysis.full}`
+      localAnalysis.technical = extractTaggedSection(rawKaggleOutput, 'TechnicalAnalysis') || localAnalysis.technical
+      localAnalysis.fundamental = extractTaggedSection(rawKaggleOutput, 'Fundamentals') || localAnalysis.fundamental
+      localAnalysis.sentiment = extractTaggedSection(rawKaggleOutput, 'NewsSentiment') || localAnalysis.sentiment
+      localAnalysis.conclusion = extractTaggedSection(rawKaggleOutput, 'Conclusion') || aiResult.reasoning || localAnalysis.conclusion
+      localAnalysis.factors = parsedKeyFactors.length > 0 ? parsedKeyFactors : localAnalysis.factors
+      localAnalysis.model = `${aiResult.model_version} + DuckDB Ledger`
+      analysis.value = localAnalysis
     } catch (apiErr) {
       console.error('Kaggle API error, using local analysis:', apiErr)
-      // Fallback to local analysis
       analysis.value = buildAnalysis()
+      const message = apiErr instanceof Error ? apiErr.message : 'Khong the tao phan tich AI.'
+      handleAnalysisJobFailure(message)
     }
     
     backtestRecords.value = buildBacktestRecords()

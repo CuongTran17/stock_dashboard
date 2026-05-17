@@ -128,3 +128,24 @@ def load_technical_cache_to_duckdb(
         total += 1
     log.info("Loaded %d technical cache rows into DuckDB", total)
     return total
+
+
+def load_market_features_to_duckdb(
+    cfg: EtlConfig | None = None,
+    dataset: pd.DataFrame | None = None,
+    repo: MarketDuckDB | LazyMarketDuckDB = market_repo,
+    run_id: str | None = None,
+    source_path: str | None = None,
+) -> int:
+    if dataset is None:
+        latest_file = _latest_processed_parquet(cfg)
+        if not latest_file:
+            log.error("No parquet files found in processed dir")
+            return 0
+        dataset = pd.read_parquet(latest_file)
+        source_path = source_path or str(latest_file)
+
+    resolved_run_id = run_id or (cfg.run_id if cfg else "manual")
+    total = repo.upsert_market_features(dataset, run_id=resolved_run_id, source_path=source_path)
+    log.info("Loaded %d market feature rows into DuckDB", total)
+    return total

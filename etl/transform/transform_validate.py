@@ -256,3 +256,53 @@ def enforce_quality_contract(
         report.get("outlier_count"),
     )
     return report
+
+
+def enforce_publish_quality_gate(
+    df: pd.DataFrame,
+    expected_symbols: list[str] | None = None,
+    *,
+    min_symbol_coverage_ratio: float = 0.95,
+    max_outlier_ratio: float = 0.05,
+    fail_on_warnings: bool = False,
+) -> dict[str, object]:
+    """Enforce stricter checks before a dataset is allowed to become latest."""
+    report = enforce_quality_contract(df, expected_symbols=expected_symbols)
+
+    expected = sorted(set(str(symbol).upper() for symbol in (expected_symbols or [])))
+    symbol_count = int(report.get("symbol_count") or 0)
+    expected_count = len(expected)
+    coverage_ratio = (symbol_count / expected_count) if expected_count else 1.0
+
+    row_count = int(report.get("row_count") or 0)
+    outlier_count = int(report.get("outlier_count") or 0)
+    outlier_ratio = (outlier_count / row_count) if row_count else 0.0
+
+    gate_errors: list[str] = []
+    if coverage_ratio < min_symbol_coverage_ratio:
+        gate_errors.append(
+            f"Symbol coverage {coverage_ratio:.1%} below minimum {min_symbol_coverage_ratio:.1%}"
+        )
+    if outlier_ratio > max_outlier_ratio:
+        gate_errors.append(
+            f"Outlier ratio {outlier_ratio:.1%} above maximum {max_outlier_ratio:.1%}"
+        )
+
+    warnings = list(report.get("warnings") or [])
+    if fail_on_warnings and warnings:
+        gate_errors.extend(str(warning) for warning in warnings)
+
+    report["publish_gate"] = {
+        "status": "failed" if gate_errors else "passed",
+        "min_symbol_coverage_ratio": float(min_symbol_coverage_ratio),
+        "symbol_coverage_ratio": float(coverage_ratio),
+        "max_outlier_ratio": float(max_outlier_ratio),
+        "outlier_ratio": float(outlier_ratio),
+        "fail_on_warnings": bool(fail_on_warnings),
+        "errors": gate_errors,
+    }
+
+    if gate_errors:
+        raise QualityContractError("; ".join(gate_errors))
+
+    return report

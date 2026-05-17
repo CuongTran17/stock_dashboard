@@ -49,6 +49,33 @@ def _save_gold_market_features(dataset: pd.DataFrame, cfg: EtlConfig) -> dict[st
     }
 
 
+def _save_silver_market_data(dataset: pd.DataFrame, cfg: EtlConfig) -> dict[str, str]:
+    """Write normalized market data to the additive silver layer."""
+    silver_table_dir = cfg.silver_dir / "market_data"
+    run_dir = silver_table_dir / f"run_id={cfg.run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_data_path = run_dir / "data.parquet"
+    dataset.to_parquet(run_data_path, index=False)
+
+    latest_path = silver_table_dir / "latest.parquet"
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset.to_parquet(latest_path, index=False)
+
+    partition_root = silver_table_dir / "by_symbol"
+    if "symbol" in dataset.columns:
+        for symbol, frame in dataset.groupby("symbol"):
+            symbol_dir = partition_root / f"symbol={str(symbol).upper()}"
+            symbol_dir.mkdir(parents=True, exist_ok=True)
+            frame.sort_values("data_date").to_parquet(symbol_dir / "latest.parquet", index=False)
+
+    return {
+        "silver_market_data_run": str(run_data_path),
+        "silver_market_data_latest": str(latest_path),
+        "silver_market_data_by_symbol": str(partition_root),
+    }
+
+
 def save_processed_parquet(dataset: pd.DataFrame, cfg: EtlConfig) -> Path:
     cfg.processed_dir.mkdir(parents=True, exist_ok=True)
     out = cfg.processed_dir / f"market_data_{cfg.run_id}.parquet"
@@ -61,6 +88,7 @@ def save_processed_parquet(dataset: pd.DataFrame, cfg: EtlConfig) -> Path:
             symbol_dir.mkdir(parents=True, exist_ok=True)
             frame.to_parquet(symbol_dir / "latest.parquet", index=False)
 
+    silver_artifacts = _save_silver_market_data(dataset, cfg)
     gold_artifacts = _save_gold_market_features(dataset, cfg)
     quality_summary = build_quality_contract_report(dataset, expected_symbols=list(cfg.symbols))
 
@@ -79,6 +107,7 @@ def save_processed_parquet(dataset: pd.DataFrame, cfg: EtlConfig) -> Path:
         "lake_layout_version": 1,
         "layers": {
             "legacy_processed": str(out),
+            **silver_artifacts,
             **gold_artifacts,
         },
     }
