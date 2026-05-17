@@ -130,6 +130,8 @@ class EtlConfig:
     enable_fundamental: bool = True
     enable_google_news: bool = True
     google_news_period: str = "7d"
+    enable_market_duckdb_load: bool = True
+    enable_mysql_cache_load: bool = True
     enable_mysql_load: bool = True
     enable_tick_eod: bool = True
     tick_source: str = "lake"  # "lake" | "redis" | "auto"
@@ -205,6 +207,8 @@ class EtlConfig:
         enable_google_news: bool = True,
         google_news_period: str = "7d",
         enable_mysql_load: bool = True,
+        enable_market_duckdb_load: bool = True,
+        enable_mysql_cache_load: bool | None = None,
         enable_tick_eod: bool = True,
         tick_source: str = "lake",
         run_mode: str = "full",
@@ -225,6 +229,8 @@ class EtlConfig:
             enable_fundamental=enable_fundamental,
             enable_google_news=enable_google_news,
             google_news_period=google_news_period,
+            enable_market_duckdb_load=enable_market_duckdb_load,
+            enable_mysql_cache_load=enable_mysql_load if enable_mysql_cache_load is None else enable_mysql_cache_load,
             enable_mysql_load=enable_mysql_load,
             enable_tick_eod=enable_tick_eod,
             tick_source=tick_source,

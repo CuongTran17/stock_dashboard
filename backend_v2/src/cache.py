@@ -1,11 +1,12 @@
 """
-DB-backed cache helpers.
+Cache helpers.
 
-Provides load/save helpers for symbol payload caches (news, events, overview)
-and for financial-report and technical-indicator caches stored in MySQL.
+Provides MySQL-backed helpers for symbol payload caches and financial-report
+caches, plus DuckDB-backed helpers for technical-indicator cache.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone
 from typing import Any, Optional
@@ -13,16 +14,11 @@ from typing import Any, Optional
 from sqlalchemy import select
 
 from src.database.db import AsyncSessionLocal
-from src.database.models import FinancialReportCache, TechnicalCache
+from src.database.market_duckdb import TechnicalCacheRow, market_repo
+from src.database.models import FinancialReportCache
 from src.utils import _json_dumps, _json_loads, _row_is_fresh, _row_iso_timestamp
 
 logger = logging.getLogger(__name__)
-
-
-def _apply_date_filters(query: Any, start_date: Any, end_date: Any) -> Any:
-    query = query.where(TechnicalCache.start_date.is_(None) if start_date is None else TechnicalCache.start_date == start_date)
-    query = query.where(TechnicalCache.end_date.is_(None) if end_date is None else TechnicalCache.end_date == end_date)
-    return query
 
 
 # ── Symbol payload cache (news, events, company overview) ─────────────
@@ -143,23 +139,14 @@ async def _load_technical_cache(
     start_date: Optional[date],
     end_date: Optional[date],
     limit: int,
-) -> tuple[Optional[TechnicalCache], Optional[dict[str, Any]]]:
-    async with AsyncSessionLocal() as db:
-        query = select(TechnicalCache).where(
-            TechnicalCache.symbol == symbol,
-            TechnicalCache.limit_value == limit,
-        )
-        query = _apply_date_filters(query, start_date, end_date)
-
-        result = await db.execute(query)
-        row = result.scalars().first()
-        if not row:
-            return None, None
-
-        payload = _json_loads(row.payload_json, fallback={})
-        if not isinstance(payload, dict):
-            payload = {}
-        return row, payload
+) -> tuple[Optional[TechnicalCacheRow], Optional[dict[str, Any]]]:
+    return await asyncio.to_thread(
+        market_repo.load_technical_cache,
+        symbol,
+        start_date,
+        end_date,
+        limit,
+    )
 
 
 async def _save_technical_cache(
@@ -171,33 +158,18 @@ async def _save_technical_cache(
     history_last_time: Optional[str],
     payload: dict[str, Any],
 ) -> Optional[str]:
-    async with AsyncSessionLocal() as db:
-        try:
-            query = select(TechnicalCache).where(
-                TechnicalCache.symbol == symbol,
-                TechnicalCache.limit_value == limit,
-            )
-            query = _apply_date_filters(query, start_date, end_date)
-            result = await db.execute(query)
-            row = result.scalars().first()
-            if row is None:
-                row = TechnicalCache(
-                    symbol=symbol,
-                    start_date=start_date,
-                    end_date=end_date,
-                    limit_value=limit,
-                )
-
-            row.history_count = history_count
-            row.history_last_time = history_last_time
-            row.payload_json = _json_dumps(payload)
-            row.source = "mysql"
-            row.updated_at = datetime.now(timezone.utc)
-
-            db.add(row)
-            await db.commit()
-            return _row_iso_timestamp(row.updated_at)
-        except Exception as exc:
-            await db.rollback()
-            logger.warning("Failed to save technical cache for %s: %s", symbol, exc)
-            return None
+    try:
+        return await asyncio.to_thread(
+            market_repo.upsert_technical_cache,
+            symbol,
+            start_date,
+            end_date,
+            limit,
+            history_count,
+            history_last_time,
+            payload,
+            "duckdb",
+        )
+    except Exception as exc:
+        logger.warning("Failed to save DuckDB technical cache for %s: %s", symbol, exc)
+        return None

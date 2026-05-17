@@ -42,7 +42,10 @@ def _run_ngrok(port: int, domain: str, authtoken: str | None) -> subprocess.Pope
 
 
 def main() -> int:
-    load_dotenv()
+    backend_dir = pathlib.Path(__file__).resolve().parent
+    repo_root = backend_dir.parent
+    load_dotenv(repo_root / ".env")
+    load_dotenv(backend_dir / ".env", override=True)
 
     backend_port = int(os.getenv("BACKEND_PORT", "8000"))
 

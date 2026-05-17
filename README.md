@@ -1,351 +1,350 @@
 # VNStock Dashboard
 
-Ứng dụng theo dõi thị trường chứng khoán Việt Nam, tập trung vào VN30. Dự án gồm frontend Vue, backend FastAPI, pipeline ETL, data lake parquet và các màn hình vận hành cho admin.
+Ứng dụng theo dõi và phân tích thị trường chứng khoán Việt Nam, tập trung vào dữ liệu VN30. Dự án gồm frontend Vue 3, backend FastAPI, pipeline ETL, data lake Parquet, DuckDB warehouse và các màn hình vận hành cho admin.
 
-## Tổng Quan
+## Tổng Quan Kiến Trúc
 
 ```text
-Frontend Vue 3 + TypeScript + Tailwind CSS + Vite
+Vue 3 + TypeScript + Vite
         |
         | REST API / WebSocket
         v
-Backend FastAPI + APScheduler
+FastAPI backend
         |
-        +-- MySQL: application tables + cache tables
-        +-- Redis: optional realtime tick cache
-        +-- Data Lake: raw / processed / gold parquet
-        +-- ETL: Extract -> Validate/Transform -> Load
+        +-- MySQL: user, auth, portfolio, payment, cache nghiệp vụ
+        +-- DuckDB: daily OHLCV, technical cache, market feature mart
+        +-- Redis: optional realtime/cache runtime
+        +-- lake/: raw, processed, gold parquet snapshots
+        +-- etl/: Extract -> Transform -> Load
 ```
 
-## Tính Năng
+## Thành Phần Chính
 
-| Nhóm | Mô tả |
+| Thành phần | Mô tả |
 |---|---|
-| Market dashboard | Bảng giá VN30, market overview, chi tiết cổ phiếu, technical chart |
-| Realtime | WebSocket stream, intraday refresh, Redis cache hoặc fallback in-memory |
-| Analysis | Fundamental, financial reports, technical indicators, AI analysis qua Kaggle endpoint |
-| Portfolio | Danh mục cá nhân, quantity, giá vốn, TP/SL, ghi chú |
-| Premium | Thanh toán SePay, promo code, flash sale, subscription status |
-| Admin | Quản lý user, portfolio khách hàng, doanh thu, khuyến mãi, flash sale |
-| ETL Monitor | Theo dõi health, recent runs, quality summary, load targets, trigger thủ công |
-| Scheduler | APScheduler cho ETL, cache warmup, EOD aggregation và health check |
-| Observability | `X-Request-ID`, structured error response, liveness/readiness endpoints |
+| Frontend | Dashboard, danh mục, phân tích cổ phiếu, admin, ETL monitor |
+| Backend | API FastAPI, auth JWT, payment SePay, portfolio, stock/market endpoints |
+| ETL | Lấy dữ liệu giá, chỉ số, tin tức, cơ bản, transform indicator và load snapshot |
+| Data lake | Lưu raw/processed/gold Parquet để tái lập snapshot |
+| DuckDB | Kho dữ liệu market local cho OHLCV, technical cache và feature mart |
+| MySQL | Dữ liệu app/user/business và một số cache nghiệp vụ |
+| Redis | Tùy chọn, dùng cho realtime/cache; nếu không có backend có fallback in-memory |
 
-## Tech Stack
+## Yêu Cầu Môi Trường
 
-**Frontend**
+- Node.js 22 hoặc tương thích với Vite 6.
+- Python 3.11+.
+- MySQL 8 local hoặc remote.
+- Redis 7 là tùy chọn.
+- Windows PowerShell được dùng trong các ví dụ bên dưới.
 
-- Vue 3, Composition API
-- TypeScript
-- Tailwind CSS 4
-- Vite 6
-- Vue Router 4
-- ApexCharts, Lightweight Charts
-- Shared HTTP client tại `src/services/httpClient.ts`
+## Cài Đặt Lần Đầu
 
-**Backend**
-
-- FastAPI, Uvicorn
-- SQLAlchemy 2, Alembic
-- MySQL 8
-- Redis 7, optional
-- APScheduler
-- pydantic-settings
-- vnstock, pandas, pyarrow/parquet
-- GoogleNews, dateparser
-
-## Cài Đặt
-
-### 1. Backend
+### 1. Cài frontend dependencies
 
 ```powershell
 cd C:\Users\Lenovo\Downloads\tailadmin-vuejs-1.0.0
+npm install
+```
+
+### 2. Tạo Python virtual environment
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r backend_v2\requirements.txt
 ```
 
-Tạo `backend_v2\.env` từ `backend_v2\.env.example`, rồi cấu hình các biến chính:
+### 3. Tạo file môi trường backend
+
+Copy file mẫu:
+
+```powershell
+Copy-Item backend_v2\.env.example backend_v2\.env
+```
+
+Các biến cần kiểm tra trong `backend_v2\.env`:
 
 ```env
-# Database
 MYSQL_URL=mysql+mysqlconnector://root:YOUR_PASSWORD@localhost/vnstock_data
 MYSQL_ASYNC_URL=mysql+aiomysql://root:YOUR_PASSWORD@localhost/vnstock_data
-DB_MIGRATIONS_ENABLED=true
-DB_LEGACY_AUTO_DDL=true
+DUCKDB_PATH=lake/warehouse/market.duckdb
 
-# Security / URL
 JWT_SECRET=change_me_to_a_long_random_string_at_least_32_chars
-JWT_EXPIRE_HOURS=24
 FRONTEND_URL=http://localhost:5174
 BACKEND_URL=http://localhost:8000
 
-# Redis optional
 REDIS_URL=redis://localhost:6379/0
 
-# ETL runtime
 ETL_SYMBOLS=FPT,VCB,VIC
 ETL_LOOKBACK_DAYS=365
 ETL_TICK_SOURCE=lake
 ETL_RUN_MODE=incremental
 ETL_INCREMENTAL_OVERLAP_DAYS=7
-ETL_CACHE_WARMUP_SCOPE=etl
 
-# Optional integrations
+VNSTOCK_API_KEY=your_dnse_api_key_here
 KAGGLE_API_URL=https://your-kaggle-ngrok.ngrok-free.dev
-SEPAY_ENV=sandbox
-SEPAY_MERCHANT_ID=your_merchant_id
-SEPAY_SECRET_KEY=your_secret
 ```
 
-Khởi tạo database nếu chưa có:
+Ghi chú:
+
+- Backend đọc cấu hình từ `.env` ở root repo và `backend_v2\.env`; file trong `backend_v2` phù hợp nhất cho runtime backend.
+- Frontend dev server đã có proxy `/api` sang `http://127.0.0.1:8000`, nên thường không bắt buộc tạo `.env.local`.
+- Nếu muốn frontend gọi backend bằng URL tuyệt đối, tạo `.env.local` ở root:
+
+```env
+VITE_BACKEND_URL=http://127.0.0.1:8000
+VITE_ENABLE_REALTIME=false
+VITE_BACKEND_POLLING_MS=15000
+```
+
+### 4. Khởi tạo MySQL database
+
+Tạo database và bảng nền tảng:
 
 ```powershell
 mysql -u root -p < backend_v2\init_database.sql
 ```
 
-Chạy Alembic migrations:
+Chạy migration:
 
 ```powershell
 cd backend_v2
 ..\.venv\Scripts\alembic.exe -c alembic.ini upgrade head
+cd ..
 ```
 
-Ghi chú:
+### 5. Tạo dữ liệu market snapshot ban đầu
 
-- Dự án dùng `backend_v2/src/settings.py` làm nguồn cấu hình tập trung.
-- App đọc `.env` ở root repo và `backend_v2/.env`; file backend được ưu tiên cho backend runtime.
-- Với database local đã tồn tại trước Alembic, app có thể stamp baseline khi startup. Sau khi schema ổn định, nên đặt `DB_LEGACY_AUTO_DDL=false` trong production.
+Backend đang theo hướng strict snapshot: API đọc dữ liệu snapshot có sẵn, không tự fetch dữ liệu thị trường khi startup. Vì vậy sau khi cài đặt nên chạy ETL ít nhất một lần.
 
-### 2. Frontend
+Chạy nhanh vài mã để kiểm tra pipeline:
 
 ```powershell
-npm install
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB --run-mode incremental --tick-source lake --max-workers 2
 ```
 
-## Chạy Dự Án
+Chạy toàn bộ VN30 theo mặc định:
 
-Backend:
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --run-mode incremental --tick-source lake
+```
+
+Kết quả ETL chính:
+
+- `market_data.csv`
+- `market_data.parquet`
+- `lake\raw\...`
+- `lake\processed\market_data_<run_id>.parquet`
+- `lake\processed\runs\<run_id>.json`
+- `lake\silver\market_data\run_id=<run_id>\data.parquet`
+- `lake\silver\market_data\latest.parquet`
+- `lake\gold\market_features\latest.parquet`
+- `lake\manifests\latest_success.json`
+- `lake\warehouse\market.duckdb`
+
+## Các Bước Khi Khởi Động Dự Án
+
+Làm theo checklist này mỗi lần mở dự án local:
+
+1. Mở terminal tại root repo:
+
+```powershell
+cd C:\Users\Lenovo\Downloads\tailadmin-vuejs-1.0.0
+```
+
+2. Kích hoạt Python environment:
+
+```powershell
+.\.venv\Scripts\activate
+```
+
+3. Đảm bảo MySQL đang chạy và `backend_v2\.env` trỏ đúng `MYSQL_URL`.
+
+4. Nếu dùng Redis, bật Redis:
 
 ```powershell
 cd backend_v2
-  ..\.venv\Scripts\python.exe run.py
+docker compose up -d redis
+cd ..
 ```
 
-Hoặc từ thư mục gốc:
+Nếu không dùng Redis, backend vẫn có thể chạy với fallback in-memory cho một số luồng.
+
+5. Chạy migration khi vừa pull code mới hoặc schema thay đổi:
+
+```powershell
+cd backend_v2
+..\.venv\Scripts\alembic.exe -c alembic.ini upgrade head
+cd ..
+```
+
+6. Kiểm tra hoặc cập nhật snapshot market nếu dữ liệu cũ:
+
+```powershell
+.\.venv\Scripts\python.exe -c "from etl.health import check_etl_health; print(check_etl_health())"
+```
+
+Nếu health báo stale/missing, chạy ETL:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --run-mode incremental --tick-source lake
+```
+
+7. Chạy backend:
 
 ```powershell
 .\.venv\Scripts\python.exe backend_v2\run.py
 ```
 
-Frontend:
+8. Mở terminal khác và chạy frontend:
 
 ```powershell
 npm run dev
 ```
 
-URL mặc định:
+9. Truy cập:
 
 - Frontend: `http://localhost:5174`
-- Backend: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/api/health`
+- Backend Swagger: `http://localhost:8000/docs`
+- Backend health: `http://localhost:8000/api/health`
+- Readiness: `http://localhost:8000/api/health/ready`
 
-## Backend Runtime
+## Cách Chạy Backend
 
-### Settings
-
-Backend không đọc `os.getenv` rải rác trong route/service nữa. Các nhóm cấu hình chính nằm trong `Settings`:
-
-- Database: `MYSQL_URL`, `MYSQL_ASYNC_URL`, migration flags
-- Auth: `JWT_SECRET`, `JWT_EXPIRE_HOURS`
-- URL/CORS: `FRONTEND_URL`, `BACKEND_URL`, callback URL
-- Redis: `REDIS_URL`
-- ETL: symbols, lookback, run mode, overlap, warmup scope
-- VNStock: source, cache TTL, rate limit, retry, concurrency
-- Payment: SePay, premium price/duration
-- AI: `KAGGLE_API_URL`
-
-### Observability
-
-Mỗi request có `X-Request-ID`:
-
-- Nếu client gửi header `X-Request-ID`, backend giữ nguyên.
-- Nếu không gửi, backend tự sinh request id.
-- Response luôn trả lại `X-Request-ID`.
-- Log request gồm method, path, status, duration và request id.
-
-Error response giữ `detail` để không phá frontend, đồng thời thêm metadata:
-
-```json
-{
-  "detail": "Unsupported symbol 'INVALID'. Only VN30 symbols are allowed.",
-  "error": {
-    "code": "http_error",
-    "request_id": "codex-test"
-  }
-}
-```
-
-Các code hiện có:
-
-- `http_error`
-- `validation_error`
-- `database_error`
-- `internal_error`
-
-### Health Endpoints
-
-```text
-GET /api/health/live
-GET /api/health/ready
-GET /api/health
-```
-
-`/api/health/live` chỉ kiểm tra process còn sống và không phụ thuộc DB.
-
-`/api/health/ready` kiểm tra:
-
-- MySQL connection
-- Alembic version table
-- Redis health, optional và có thể ở trạng thái `degraded`
-
-Ví dụ response readiness:
-
-```json
-{
-  "status": "ok",
-  "checked_at": "2026-05-01T00:00:00+00:00",
-  "checks": {
-    "database": { "status": "ok" },
-    "migrations": { "status": "ok", "version": "20260429_0001" },
-    "redis": { "status": "degraded", "optional": true }
-  }
-}
-```
-
-Nếu thiếu `alembic_version`, readiness trả `503` với `missing_alembic_version`. Chạy Alembic hoặc để app stamp baseline trên môi trường dev.
-
-## ETL Pipeline
-
-Pipeline được tổ chức theo 3 phần: Extract, Transform, Load.
-
-### Extract
-
-Nguồn dữ liệu:
-
-- Daily OHLCV theo symbol
-- Company overview
-- Financial reports
-- News/events
-- Google News
-- Macro indices: VNINDEX, VN30, HNXINDEX, UPCOMINDEX
-- Tick/intraday từ Data Lake hoặc Redis khi bật EOD aggregation
-
-Module chính:
-
-- `etl/extract/*`
-- `etl/config.py`
-
-### Transform
-
-Các bước xử lý:
-
-- Chuẩn hóa schema cuối pipeline
-- Validate data quality contract bằng `etl/transform/transform_validate.py`
-- Dedup theo symbol/ngày
-- Gắn cờ `is_outlier` bằng IQR
-- Tính technical indicators: SMA, EMA, RSI, MACD, Bollinger Bands, Volume SMA, ATR
-- Merge fundamental bằng `merge_asof(direction="backward")` để tránh look-ahead bias
-- Gộp và dedup news/event/Google News headline
-- Tick to EOD aggregation với session filter
-
-Module chính:
-
-- `etl/transform/build_dataset.py`
-- `etl/transform/transform_validate.py`
-- `etl/transform/transform_indicators.py`
-- `etl/transform/transform_fundamental.py`
-- `etl/transform/transform_googlenews.py`
-- `etl/transform/transform_aggregate.py`
-
-### Load
-
-Đích ghi dữ liệu:
-
-- `lake/processed/market_data_<run_id>.parquet`
-- `lake/processed/market_data_<run_id>.meta.json`
-- `lake/processed/by_symbol/<SYMBOL>/latest.parquet`
-- `lake/processed/runs/<run_id>.json`
-- Gold layer theo partition để phục vụ đọc nhanh
-- MySQL cache/application tables:
-  - `daily_ohlcv`
-  - `company_overview_cache`
-  - `financial_report_cache`
-  - `news_cache`
-  - `events_cache`
-  - `technical_cache`
-
-Module chính:
-
-- `etl/load_to_parquet.py`
-- `etl/load_to_mysql.py`
-- `etl/run_metadata.py`
-- `etl/run_etl.py`
-
-## Strict Snapshot Data Mode
-
-Market data uses a manual, reproducible snapshot model.
-
-Runtime invariants:
-
-- Backend startup is read-only for market data.
-- Read APIs never create market data.
-- Only CLI ETL and admin ETL trigger can write market snapshots/cache.
-- Missing or stale data is reported, not auto-fixed.
-
-Short-term serving:
-
-- MySQL cache tables serve stock/market APIs.
-- `lake/processed` and `lake/gold` remain the source of truth and audit trail.
-- User/app data remains in MySQL.
-
-Supported write paths:
+Từ root repo:
 
 ```powershell
-.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB --run-mode incremental
+.\.venv\Scripts\python.exe backend_v2\run.py
 ```
 
-```text
-POST /api/etl/trigger
-```
-
-Read API data statuses:
-
-- `DATA_AVAILABLE`
-- `NO_DATA_IN_SNAPSHOT`
-- `SNAPSHOT_NOT_BUILT`
-- `REFRESH_DISABLED_IN_SNAPSHOT_MODE`
-- `ETL_RUNNING`
-- `ETL_FAILED`
-- `STALE_SNAPSHOT`
-
-Long-term direction: MySQL should keep only user/app/business data. Stock and
-market data should move to a lakehouse/warehouse boundary based on
-bronze/silver/gold parquet and DuckDB views/marts.
-
-## Chạy ETL
-
-Chạy incremental theo cấu hình mặc định:
+Hoặc từ thư mục backend:
 
 ```powershell
-.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB --run-mode incremental --tick-source lake
+cd backend_v2
+..\.venv\Scripts\python.exe run.py
 ```
 
-Chạy backfill theo khoảng ngày:
+Backend mặc định chạy tại `http://localhost:8000`.
+
+Chạy backend kèm ngrok cho webhook SePay local:
 
 ```powershell
-.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT --start-date 2026-04-20 --end-date 2026-04-28 --run-mode backfill --output dev-archive\etl_full_fpt.csv --max-workers 2
+npm run backend:ngrok
+```
+
+Trước khi dùng ngrok, cấu hình các biến `NGROK_AUTHTOKEN`, `NGROK_DEV_DOMAIN`, `IPN_URL` hoặc `SEPAY_IPN_URL` trong `backend_v2\.env`.
+
+## Cách Chạy Frontend
+
+```powershell
+npm run dev
+```
+
+Các script frontend:
+
+| Lệnh | Mô tả |
+|---|---|
+| `npm run dev` | Chạy Vite dev server port 5174 |
+| `npm run build` | Type-check và build production |
+| `npm run build-only` | Chỉ build Vite |
+| `npm run type-check` | Kiểm tra TypeScript/Vue |
+| `npm run lint` | Chạy ESLint và tự fix |
+| `npm run preview` | Preview bản build |
+
+## Cách Chạy ETL
+
+ETL entrypoint chính là:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl
+```
+
+### Chạy incremental
+
+Incremental tự tìm snapshot mới nhất trong `lake\processed`, lùi lại một số ngày overlap rồi merge vào snapshot hiện tại.
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB,VIC --run-mode incremental --incremental-overlap-days 7 --tick-source lake
+```
+
+### Chạy full theo khoảng ngày
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB,VIC --start-date 2025-04-01 --end-date 2026-04-01 --run-mode full
+```
+
+### Chạy backfill một khoảng ngày
+
+Backfill phù hợp khi cần cập nhật lại một đoạn dữ liệu trong snapshot hiện có.
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT --start-date 2026-04-20 --end-date 2026-04-28 --run-mode backfill --max-workers 2
+```
+
+### Chạy nhanh khi chỉ cần giá và technical
+
+Tắt bớt nguồn nặng như fundamental hoặc Google News:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB --run-mode incremental --disable-fundamental --disable-google-news --max-workers 2
+```
+
+### Chỉ ghi file, bỏ qua MySQL hoặc DuckDB
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB --disable-mysql-load --disable-duckdb-market-load
+```
+
+### Các tham số ETL hay dùng
+
+| Tham số | Mô tả |
+|---|---|
+| `--symbols FPT,VCB` | Danh sách mã, phân tách bằng dấu phẩy |
+| `--start-date YYYY-MM-DD` | Ngày bắt đầu output |
+| `--end-date YYYY-MM-DD` | Ngày kết thúc output |
+| `--run-mode full` | Chạy lại toàn bộ khoảng ngày được chỉ định |
+| `--run-mode incremental` | Cập nhật dựa trên snapshot mới nhất |
+| `--run-mode backfill` | Ghi đè/merge một khoảng ngày vào snapshot mới nhất |
+| `--incremental-overlap-days 7` | Số ngày overlap khi incremental |
+| `--max-workers 6` | Số worker extract song song |
+| `--tick-source lake` | Nguồn tick để aggregate EOD: `lake`, `redis`, `auto` |
+| `--disable-fundamental` | Không extract báo cáo tài chính |
+| `--disable-google-news` | Không extract Google News |
+| `--disable-mysql-load` | Không load cache vào MySQL |
+| `--disable-duckdb-market-load` | Không load market warehouse vào DuckDB |
+| `--no-merge-with-latest` | Không merge incremental/backfill với snapshot mới nhất |
+
+## Data Lake Publish Model
+
+ETL ghi immutable run artifacts truoc, sau do moi publish snapshot cho app doc. Mot run chi duoc xem la serving-ready khi:
+
+1. Transform tao dataset thanh cong.
+2. Final merged dataset vuot qua publish quality gate.
+3. Processed, silver, gold va DuckDB/MySQL load hoan tat.
+4. `lake\manifests\latest_success.json` duoc cap nhat atomic.
+
+Mo hinh nay giup tranh tinh huong mot snapshot loi bi app doc nham la latest. Khi quality gate fail, run metadata se ghi `failed`, nhung manifest latest cu van duoc giu nguyen.
+
+Current compatible paths:
+
+| Layer/path | Vai tro |
+|---|---|
+| `lake\raw` | Raw extractor files theo source/run |
+| `lake\processed` | Legacy processed snapshots, giu de tuong thich script cu |
+| `lake\silver\market_data` | Normalized market data theo `run_id` va `latest.parquet` |
+| `lake\gold\market_features` | Feature mart cho AI/backtest/API |
+| `lake\manifests\latest_success.json` | Serving pointer cho snapshot thanh cong moi nhat |
+| `lake\warehouse\market.duckdb` | Local analytical warehouse va AI job/result store |
+
+Quality gate hien check cac loi schema/duplicate/OHLC/volume/close, symbol coverage va outlier ratio. Mac dinh yeu cau it nhat 95% so ma ky vong co mat trong dataset va outlier ratio khong qua 5%.
+
+## Scheduler ETL
+
+Kiểm tra các job sẽ đăng ký:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.scheduler --dry-run
 ```
 
 Chạy scheduler độc lập:
@@ -354,57 +353,109 @@ Chạy scheduler độc lập:
 .\.venv\Scripts\python.exe -m etl.scheduler
 ```
 
-Kiểm tra đăng ký scheduler:
-
-```powershell
-.\.venv\Scripts\python.exe -m etl.scheduler --dry-run
-```
-
-Kiểm tra ETL health:
-
-```powershell
-.\.venv\Scripts\python.exe -c "from etl.health import check_etl_health; print(check_etl_health())"
-```
-
-## Scheduler
-
-Strict snapshot mode disables embedded FastAPI scheduling. Backend startup does
-not register ETL, preload, intraday, cache warmup, or EOD aggregation jobs.
-Manual CLI ETL and the admin ETL trigger are the supported update paths.
-
-The standalone scheduler module remains available for local inspection or future
-operations work, but it is not started by the web backend in strict snapshot
-mode.
-
 Lịch mặc định:
 
 | Job | Lịch | Mô tả |
 |---|---:|---|
-| `vn30-eod-job` | 15:15 Mon-Fri | Aggregate tick/intraday thành daily OHLCV, mặc định tắt bằng `VN30_EOD_JOB_ENABLED=false` |
-| `etl-daily-full` | 15:20 Mon-Fri | Chạy ETL theo cấu hình |
-| `etl-cache-refresh` | 15:30 Mon-Fri | Warmup backend caches sau ETL |
-| `etl-weekly-fundamental` | 00:00 Sunday | Refresh dữ liệu fundamental |
-| `etl-health-check` | 5 phút/lần | Log cảnh báo nếu dữ liệu stale/error |
+| `etl-daily-full` | 15:20 Mon-Fri | Chạy ETL incremental |
+| `etl-cache-refresh` | 15:30 Mon-Fri | Refresh cache sau ETL |
+| `etl-weekly-fundamental` | 00:00 Sunday | Refresh dữ liệu cơ bản |
+| `etl-health-check` | 5 phút/lần | Kiểm tra freshness và lỗi ETL |
+
+Backend web hiện không nên được xem là nơi tự động tạo snapshot market khi startup. Đường ghi dữ liệu market được khuyến nghị là CLI ETL, scheduler độc lập hoặc admin ETL trigger.
+
+## DuckDB Và Market Feature Mart
+
+Đường dẫn mặc định:
+
+```text
+lake/warehouse/market.duckdb
+```
+
+Inspect mart:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.inspect_duckdb_market_mart
+```
+
+Backfill mart từ Parquet snapshot:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.backfill_duckdb_market_features --parquet lake/gold/market_features/latest.parquet --run-id backfill-latest
+```
+
+Backfill kết quả thực tế cho các lần phân tích AI:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.backfill_ai_prediction_outcomes --horizon-trading-days 5
+```
+
+### AI Analysis Ledger Trong DuckDB
+
+Ket qua AI duoc luu trong cung DuckDB warehouse:
+
+```text
+lake/warehouse/market.duckdb
+```
+
+Backend se tao schema DuckDB khi startup. Sau khi co thay doi schema moi, nen restart backend de cac bang moi nhu `ai_generation_jobs` duoc tao bang `CREATE TABLE IF NOT EXISTS`.
+
+Bang chinh:
+
+| Bang | Noi dung |
+|---|---|
+| `ai_generation_jobs` | Trang thai job async: `queued`, `running`, `success`, `failed` |
+| `ai_analysis_runs` | Metadata cua moi lan phan tich: symbol, status, decision, confidence, model version, error |
+| `ai_analysis_payloads` | Input/output day du: context, prompt, Kaggle response, raw model output, normalized output |
+| `ai_prediction_outcomes` | Ket qua doi chieu sau nay cho backtest/evaluation |
+
+Mapping input/output trong `ai_analysis_payloads`:
+
+| Cot | Y nghia |
+|---|---|
+| `request_context_json` | Market context dua vao model |
+| `prompt_text` | Prompt thuc te gui sang Trading-R1/Kaggle API |
+| `kaggle_response_json` | JSON response tu API |
+| `raw_output` | Raw text output cua model |
+| `normalized_output_json` | Ket qua da parse/normalize de frontend hien thi |
+
+Inspect nhanh so dong:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import duckdb; c=duckdb.connect('lake/warehouse/market.duckdb', read_only=True); print(c.execute('SELECT COUNT(*) FROM ai_analysis_runs').fetchone()); print(c.execute('SELECT COUNT(*) FROM ai_analysis_payloads').fetchone()); print(c.execute('SELECT COUNT(*) FROM ai_generation_jobs').fetchone())"
+```
+
+Xem 5 lan phan tich moi nhat:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import duckdb; c=duckdb.connect('lake/warehouse/market.duckdb', read_only=True); print(c.execute('SELECT analysis_id, symbol, status, decision, confidence, created_at, completed_at FROM ai_analysis_runs ORDER BY created_at DESC LIMIT 5').fetchall())"
+```
 
 ## Admin ETL Monitor
 
-Trong Admin dashboard có tab **ETL Monitor**.
+Trong Admin Dashboard có tab ETL Monitor để xem:
 
-Tab này hiển thị:
+- ETL health và freshness.
+- Run gần nhất, số dòng, số mã, thời gian chạy.
+- Quality summary.
+- Load targets: Parquet, gold layer, DuckDB, MySQL cache.
+- Lịch sử các run.
+- Nút trigger ETL thủ công cho admin.
 
-- Trạng thái health: `healthy`, `stale`, `error`
-- Run mới nhất, thời gian chạy, row count, symbols
-- Freshness và dung lượng disk
-- Mô tả rõ 3 phase Extract, Transform, Load
-- Nhóm cột dữ liệu: identity, price, technical, fundamental, macro, news, quality
-- Quality summary: outlier count, duplicate rows, missing columns
-- Load targets: parquet, by-symbol parquet, gold layer, MySQL cache tables
-- Lịch sử ETL runs
-- Nút trigger ETL thủ công cho admin, có confirm và rate limit phía backend
+Endpoint ETL:
 
-## API Endpoints
+```text
+GET  /api/etl/status
+GET  /api/etl/runs?limit=10
+GET  /api/etl/health
+POST /api/etl/trigger
+```
 
-### Health
+`POST /api/etl/trigger` yêu cầu admin token và có rate limit.
+
+## API Chính
+
+Health:
 
 ```text
 GET /api/health/live
@@ -412,7 +463,7 @@ GET /api/health/ready
 GET /api/health
 ```
 
-### Auth
+Auth:
 
 ```text
 POST /api/auth/register
@@ -422,7 +473,7 @@ PUT  /api/auth/profile
 PUT  /api/auth/password
 ```
 
-### Stocks / Market
+Stocks/Market:
 
 ```text
 GET /api/stocks
@@ -441,13 +492,13 @@ GET /api/events
 WS  /api/ws/market
 ```
 
-### Analysis
+Analysis:
 
 ```text
 POST /api/analysis/{symbol}/generate
 ```
 
-### Portfolio
+Portfolio:
 
 ```text
 GET    /api/portfolio/
@@ -456,7 +507,7 @@ PUT    /api/portfolio/{symbol}
 DELETE /api/portfolio/{symbol}
 ```
 
-### Payment
+Payment:
 
 ```text
 GET  /api/payment/premium-info
@@ -465,7 +516,7 @@ GET  /api/payment/subscription-status
 POST /api/payment/sepay/webhook
 ```
 
-### Admin
+Admin:
 
 ```text
 GET    /api/admin/sales-stats
@@ -486,92 +537,48 @@ PATCH  /api/admin/flash-sales/{flash_sale_id}/status
 DELETE /api/admin/flash-sales/{flash_sale_id}
 ```
 
-### ETL
-
-```text
-GET  /api/etl/status
-GET  /api/etl/runs?limit=10
-GET  /api/etl/health
-POST /api/etl/trigger
-```
-
-`POST /api/etl/trigger` yêu cầu admin token và bị rate limit 1 lần mỗi 30 phút.
-
-## Cấu Trúc Dự Án
+## Cấu Trúc Thư Mục
 
 ```text
 tailadmin-vuejs-1.0.0/
-├── src/
+├── src/                         # Frontend Vue
 │   ├── views/
-│   │   ├── Admin/
-│   │   │   ├── AdminDashboard.vue
-│   │   │   └── components/TabEtlMonitor.vue
-│   │   ├── StockDashboard.vue
-│   │   ├── StockDetail.vue
-│   │   └── StockAIAnalysis.vue
+│   ├── components/
 │   ├── services/
-│   │   ├── httpClient.ts
-│   │   ├── authApi.ts
-│   │   └── stockBackendApi.ts
 │   └── router/
-├── backend_v2/
+├── backend_v2/                  # FastAPI backend
 │   ├── alembic/
-│   ├── alembic.ini
 │   ├── src/
-│   │   ├── main.py
-│   │   ├── settings.py
-│   │   ├── api_errors.py
-│   │   ├── observability.py
-│   │   ├── jobs.py
 │   │   ├── api/
 │   │   ├── routes/
-│   │   │   ├── health.py
-│   │   │   └── etl_status.py
 │   │   ├── services/
 │   │   └── database/
 │   ├── init_database.sql
-│   └── requirements.txt
-├── etl/
-│   ├── config.py
+│   ├── requirements.txt
+│   └── run.py
+├── etl/                         # ETL pipeline
+│   ├── extract/
+│   ├── transform/
 │   ├── run_etl.py
 │   ├── scheduler.py
-│   ├── health.py
-│   ├── run_metadata.py
-│   ├── load_to_mysql.py
-│   ├── load_to_parquet.py
-│   ├── extract/
-│   └── transform/
-├── lake/
-│   └── processed/
+│   └── load_to_duckdb.py
+├── lake/                        # Data lake local
+│   ├── raw/
+│   ├── processed/
+│   ├── gold/
+│   └── warehouse/
+├── logs/
 ├── package.json
 └── vite.config.ts
 ```
 
-## Database Tables
-
-| Bảng | Mục đích |
-|---|---|
-| `alembic_version` | Version schema migration |
-| `daily_ohlcv` | OHLCV ngày |
-| `company_overview_cache` | Cache tổng quan doanh nghiệp |
-| `financial_report_cache` | Cache báo cáo tài chính |
-| `technical_cache` | Cache chỉ báo kỹ thuật |
-| `news_cache` | Cache tin tức |
-| `events_cache` | Cache sự kiện |
-| `users` | Tài khoản |
-| `user_subscriptions` | Lịch sử Premium |
-| `user_portfolios` | Danh mục cá nhân |
-| `ai_predictions` | Kết quả AI |
-| `flash_sales` | Flash sale |
-| `promo_codes` | Mã khuyến mãi |
-
-## Test Và Verification
+## Kiểm Tra Và Build
 
 Frontend:
 
 ```powershell
-npm.cmd run type-check
-npm.cmd run build-only
+npm run type-check
+npm run build-only
 ```
 
 Backend/ETL compile:
@@ -580,39 +587,68 @@ Backend/ETL compile:
 .\.venv\Scripts\python.exe -m compileall etl backend_v2\src
 ```
 
-Backend smoke tests:
+Backend smoke test:
 
 ```powershell
 .\.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'backend_v2'); from src.main import app; print(app.title)"
 ```
 
-Kiểm tra health endpoints:
+Health smoke test:
 
 ```powershell
 .\.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'backend_v2'); from fastapi.testclient import TestClient; from src.main import app; c=TestClient(app); print(c.get('/api/health/live').json())"
 ```
 
-Kiểm tra route ETL:
+## Lỗi Thường Gặp
+
+### Frontend gọi API không được
+
+- Đảm bảo backend đang chạy ở `http://localhost:8000`.
+- Nếu dùng `VITE_BACKEND_URL`, kiểm tra file `.env.local`.
+- Nếu không dùng `VITE_BACKEND_URL`, Vite dev proxy sẽ chuyển `/api` sang backend.
+
+### Backend báo lỗi database
+
+- Kiểm tra MySQL đang chạy.
+- Kiểm tra `MYSQL_URL` và `MYSQL_ASYNC_URL`.
+- Chạy lại migration:
 
 ```powershell
-.\.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, 'backend_v2'); from src.main import app; print([r.path for r in app.routes if 'etl' in r.path])"
+cd backend_v2
+..\.venv\Scripts\alembic.exe -c alembic.ini upgrade head
+cd ..
 ```
 
-Kết quả mong đợi:
+### API market báo không có snapshot
 
-```text
-['/api/etl/status', '/api/etl/runs', '/api/etl/health', '/api/etl/trigger']
+Chạy ETL để tạo snapshot:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.run_etl --run-mode incremental --tick-source lake
 ```
 
-## Production Notes
+### ETL bị chậm
+
+- Giảm số mã bằng `--symbols`.
+- Tắt nguồn nặng bằng `--disable-fundamental --disable-google-news`.
+- Giảm worker nếu bị rate limit: `--max-workers 2`.
+
+### Redis không chạy
+
+Redis là optional cho local dev. Nếu muốn bật:
+
+```powershell
+cd backend_v2
+docker compose up -d redis
+cd ..
+```
+
+## Ghi Chú Production
 
 - Đổi `JWT_SECRET` trước khi deploy.
-- Cấu hình CORS theo domain thật qua `FRONTEND_URL`.
-- Chạy Alembic migration trước deploy: `alembic upgrade head`.
-- Đặt `DB_LEGACY_AUTO_DDL=false` trong production sau khi migration đã ổn định.
-- Theo dõi `/api/health/ready` ở load balancer hoặc container orchestrator.
-- Redis là optional, nhưng nên bật nếu chạy nhiều worker hoặc cần sync realtime cache.
-- Không public ETL trigger ngoài internet; endpoint đã yêu cầu admin nhưng vẫn nên đặt sau HTTPS/reverse proxy.
-- Nên chạy ETL scheduler standalone nếu backend web có thể restart thường xuyên.
-- Backup `lake/processed`, gold layer và MySQL nếu dùng làm nguồn phục vụ production.
-- Với chunk lớn của `apexcharts`, Vite đã tách vendor chunk riêng và đặt warning threshold phù hợp.
+- Cấu hình CORS bằng `FRONTEND_URL`.
+- Chạy Alembic migration trước khi deploy.
+- Sau khi schema ổn định, cân nhắc đặt `DB_LEGACY_AUTO_DDL=false`.
+- Không public admin ETL trigger trực tiếp ngoài internet.
+- Backup `lake\processed`, `lake\gold`, `lake\warehouse` và MySQL.
+- Chạy ETL scheduler như process riêng nếu cần cập nhật dữ liệu định kỳ.

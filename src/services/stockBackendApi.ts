@@ -4,7 +4,7 @@
  * Kết nối Vue frontend với FastAPI backend.
  */
 
-import { backendFetch, normalizeBackendUrl } from './httpClient'
+import { backendFetch, normalizeBackendUrl, type BackendFetchOptions } from './httpClient'
 
 const BACKEND_URL = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 
@@ -214,6 +214,39 @@ export interface SaveQuotePayload {
 
 export type CompanyOverview = Record<string, unknown>
 
+export interface AiAnalysisResponse {
+  status: 'ok'
+  analysis_id: string
+  symbol: string
+  decision: 'BUY' | 'SELL' | 'HOLD'
+  confidence: number
+  reasoning: string
+  raw_output: string
+  key_factors: string[]
+  model_version: string
+  prompt_version: string
+  context_hash: string
+  request_hash: string
+  response_hash: string
+  analysis: {
+    data_source: string
+    market_feature_run_id?: string | null
+    data_date?: string | null
+  }
+}
+
+export interface AiAnalysisJobResponse {
+  job_id: string
+  symbol: string
+  status: 'queued' | 'running' | 'success' | 'failed'
+  analysis_id?: string | null
+  result?: AiAnalysisResponse | Record<string, never>
+  error_message?: string | null
+  created_at?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+}
+
 class StockBackendApi {
   private baseUrl: string
 
@@ -221,8 +254,12 @@ class StockBackendApi {
     this.baseUrl = baseUrl
   }
 
-  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
-    return backendFetch<T>(this.baseUrl, path, init)
+  private async fetch<T>(
+    path: string,
+    init?: RequestInit,
+    options?: BackendFetchOptions,
+  ): Promise<T> {
+    return backendFetch<T>(this.baseUrl, path, init, options)
   }
 
   private buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -433,6 +470,35 @@ class StockBackendApi {
       method: 'POST',
       body: JSON.stringify(quotes),
     })
+  }
+
+  async generateAnalysis(symbol: string, force: boolean = false): Promise<AiAnalysisResponse> {
+    const job = await this.enqueueAnalysis(symbol, force)
+    if (job.status === 'success' && job.result && 'decision' in job.result) {
+      return job.result as AiAnalysisResponse
+    }
+    throw new Error(`Analysis generation is asynchronous. Poll job ${job.job_id}.`)
+  }
+
+  async enqueueAnalysis(symbol: string, force: boolean = false): Promise<AiAnalysisJobResponse> {
+    const query = this.buildQuery({ force })
+    return this.fetch<AiAnalysisJobResponse>(`/api/analysis/${symbol.toUpperCase()}/generate${query}`, {
+      method: 'POST',
+    }, {
+      timeoutMs: 15000,
+      retries: 0,
+    })
+  }
+
+  async getAnalysisJob(jobId: string): Promise<AiAnalysisJobResponse> {
+    return this.fetch<AiAnalysisJobResponse>(
+      `/api/analysis/jobs/${encodeURIComponent(jobId)}`,
+      undefined,
+      {
+        timeoutMs: 15000,
+        retries: 1,
+      },
+    )
   }
 }
 

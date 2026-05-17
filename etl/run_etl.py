@@ -20,11 +20,12 @@ CLI::
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -45,13 +46,21 @@ from etl.extract.extract_fundamental import extract_fundamental
 from etl.extract.extract_googlenews import extract_google_news
 from etl.extract.extract_interbank import extract_interbank_rate
 from etl.extract.extract_prices import extract_index_prices, extract_symbol_prices
-from etl.load_to_mysql import load_all, load_eod_rows
+from etl.load_to_duckdb import (
+    load_daily_price_to_duckdb,
+    load_eod_rows_to_duckdb,
+    load_market_features_to_duckdb,
+    load_technical_cache_to_duckdb,
+)
+from etl.manifest import EtlManifest, publish_latest_manifest
+from etl.load_to_mysql import load_all as load_mysql_caches
 from etl.load_to_parquet import cleanup_old_snapshots, save_processed_parquet
 from etl.logging_setup import get_logger, setup_logging
 from etl.processed_files import latest_processed_parquet
 from etl.run_metadata import RunMetadata, complete_metadata, running_metadata, save_run_metadata
 from etl.transform.transform_aggregate import aggregate_all_ticks_to_eod
 from etl.transform.build_dataset import build_full_dataset, validate_dataset
+from etl.transform.transform_validate import enforce_publish_quality_gate
 
 log = get_logger(__name__)
 
@@ -79,7 +88,7 @@ def _resolve_incremental_cfg(cfg: EtlConfig) -> EtlConfig:
     if pd.isna(latest_date):
         return cfg
 
-    resolved_start = (latest_date.date() - pd.Timedelta(days=max(cfg.incremental_overlap_days, 0))).date()
+    resolved_start = latest_date.date() - timedelta(days=max(cfg.incremental_overlap_days, 0))
     if resolved_start > cfg.user_end:
         resolved_start = cfg.user_end
     if resolved_start != cfg.user_start:
@@ -293,6 +302,10 @@ def _run_impl(cfg: EtlConfig, metadata: RunMetadata) -> Path:
         )
         save_run_metadata(metadata, cfg)
 
+    quality_report = enforce_publish_quality_gate(dataset, expected_symbols=cfg.symbols)
+    metadata.quality_report = quality_report
+    save_run_metadata(metadata, cfg)
+
     # ---- LOAD -------------------------------------------------------------
     phase_started = time.perf_counter()
     cfg.output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -315,15 +328,53 @@ def _run_impl(cfg: EtlConfig, metadata: RunMetadata) -> Path:
     metadata.artifacts["gold_market_features"] = str(cfg.gold_dir / "market_features" / f"run_id={cfg.run_id}" / "data.parquet")
     metadata.artifacts["gold_market_features_latest"] = str(cfg.gold_dir / "market_features" / "latest.parquet")
 
-    if cfg.enable_mysql_load:
-        load_all(cfg, dataset)
-        metadata.artifacts["mysql_load"] = "enabled"
-        if cfg.enable_tick_eod:
-            eod_rows = aggregate_all_ticks_to_eod(cfg.symbols, cfg, source=cfg.tick_source)
-            load_eod_rows(eod_rows)
-            metadata.row_counts["tick_eod_rows"] = int(len(eod_rows))
+    if cfg.enable_market_duckdb_load:
+        load_daily_price_to_duckdb(cfg, dataset)
+        load_technical_cache_to_duckdb(cfg, dataset)
+        load_market_features_to_duckdb(cfg, dataset, run_id=cfg.run_id, source_path=str(processed_parquet))
+        metadata.artifacts["duckdb_market_load"] = "enabled"
+        metadata.artifacts["duckdb_technical_cache_load"] = "enabled"
+        metadata.artifacts["duckdb_market_features_load"] = "enabled"
     else:
-        metadata.artifacts["mysql_load"] = "disabled"
+        metadata.artifacts["duckdb_market_load"] = "disabled"
+        metadata.artifacts["duckdb_technical_cache_load"] = "disabled"
+        metadata.artifacts["duckdb_market_features_load"] = "disabled"
+
+    if cfg.enable_mysql_cache_load:
+        load_mysql_caches(cfg, dataset)
+        metadata.artifacts["mysql_cache_load"] = "enabled"
+    else:
+        metadata.artifacts["mysql_cache_load"] = "disabled"
+
+    if cfg.enable_tick_eod:
+        eod_rows = aggregate_all_ticks_to_eod(cfg.symbols, cfg, source=cfg.tick_source)
+        load_eod_rows_to_duckdb(eod_rows)
+        metadata.row_counts["tick_eod_rows"] = int(len(eod_rows))
+
+    processed_metadata_path = cfg.processed_dir / f"market_data_{cfg.run_id}.meta.json"
+    checksum_sha256 = ""
+    try:
+        processed_metadata = json.loads(processed_metadata_path.read_text(encoding="utf-8"))
+        checksum_sha256 = str(processed_metadata.get("checksum_sha256") or "")
+    except Exception as exc:
+        log.warning("Could not read processed metadata checksum from %s: %s", processed_metadata_path, exc)
+
+    manifest = EtlManifest(
+        run_id=cfg.run_id,
+        status="success",
+        processed_path=str(processed_parquet),
+        processed_metadata_path=str(processed_metadata_path),
+        gold_market_features_path=str(cfg.gold_dir / "market_features" / f"run_id={cfg.run_id}" / "data.parquet"),
+        gold_market_features_latest_path=str(cfg.gold_dir / "market_features" / "latest.parquet"),
+        duckdb_path=str(cfg.lake_dir / "warehouse" / "market.duckdb"),
+        row_count=int(len(dataset)),
+        symbol_count=int(dataset["symbol"].nunique()) if "symbol" in dataset.columns else 0,
+        symbols=sorted(dataset["symbol"].dropna().astype(str).str.upper().unique().tolist()) if "symbol" in dataset.columns else [],
+        checksum_sha256=checksum_sha256,
+        quality_status=str(quality_report.get("status") or "unknown"),
+    )
+    manifest_out = publish_latest_manifest(cfg.lake_dir, manifest)
+    metadata.artifacts["latest_success_manifest"] = str(manifest_out)
 
     cleanup_old_snapshots(cfg, keep=5)
     _record_phase(metadata, "load", phase_started)
@@ -422,6 +473,10 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Skip loading processed/raw outputs into MySQL cache tables",
     )
     parser.add_argument(
+        "--disable-duckdb-market-load", action="store_true", default=False,
+        help="Skip loading daily OHLCV into DuckDB market warehouse",
+    )
+    parser.add_argument(
         "--disable-tick-eod", action="store_true", default=False,
         help="Skip intraday tick -> daily OHLCV aggregation",
     )
@@ -468,6 +523,7 @@ def main() -> None:
         enable_google_news=args.enable_google_news and not args.disable_google_news,
         google_news_period=args.google_news_period,
         enable_mysql_load=not args.disable_mysql_load,
+        enable_market_duckdb_load=not args.disable_duckdb_market_load,
         enable_tick_eod=not args.disable_tick_eod,
         tick_source=args.tick_source,
         run_mode=args.run_mode,

@@ -2,8 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from etl.manifest import load_latest_manifest
+
 
 def latest_processed_parquet(processed_dir: Path, *, exclude_run_id: str | None = None) -> Path | None:
+    try:
+        manifest = load_latest_manifest(processed_dir.parent)
+        candidate = Path(manifest.processed_path)
+        if candidate.exists() and (exclude_run_id is None or manifest.run_id != exclude_run_id):
+            return candidate
+    except Exception:
+        pass
+
     files = sorted(
         (
             path
