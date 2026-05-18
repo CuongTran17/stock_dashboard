@@ -84,6 +84,12 @@ ETL_INCREMENTAL_OVERLAP_DAYS=7
 
 VNSTOCK_API_KEY=your_dnse_api_key_here
 KAGGLE_API_URL=https://your-kaggle-ngrok.ngrok-free.dev
+
+DNSE_MARKET_BASE_URL=https://openapi.dnse.com.vn
+DNSE_MARKET_API_KEY=your_dnse_openapi_key
+DNSE_MARKET_API_SECRET=your_dnse_openapi_secret
+DNSE_MARKET_BOARD_ID=G1
+DNSE_TICK_POLL_INTERVAL_MS=2000
 ```
 
 Ghi chú:
@@ -491,6 +497,22 @@ GET /api/google-news
 GET /api/events
 WS  /api/ws/market
 ```
+
+DNSE tick sandbox:
+
+```text
+GET /api/dnse/ticks/status
+GET /api/dnse/ticks/latest?symbols=FPT,VCB,VIC
+GET /api/dnse/ticks/debug?symbol=FPT
+```
+
+Trang test frontend:
+
+```text
+http://localhost:5174/dnse-ticks
+```
+
+Trang nay chi dung de test latest trade/tick read-only tu DNSE. Neu chua cau hinh `DNSE_MARKET_API_KEY` va `DNSE_MARKET_API_SECRET`, backend se tra `not_configured` de frontend hien thi loi cau hinh ro rang.
 
 Analysis:
 

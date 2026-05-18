@@ -33,6 +33,10 @@ class AIJobService:
         await self._queue.put(job_id)
         return self.repo.load_ai_generation_job(job_id)
 
+    async def requeue_existing(self, job_ids: list[str]) -> None:
+        for job_id in job_ids:
+            await self._queue.put(job_id)
+
     def ensure_worker(self) -> None:
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self.run_forever())

@@ -286,9 +286,15 @@ class MarketDuckDB:
         ]
 
     @staticmethod
-    def _technical_where_clause(start_date: date | None, end_date: date | None) -> tuple[str, list[Any]]:
+    def _technical_where_clause(
+        *,
+        symbol: str,
+        limit: int,
+        start_date: date | None,
+        end_date: date | None,
+    ) -> tuple[str, list[Any]]:
         clauses = ["symbol = ?", "limit_value = ?"]
-        params: list[Any] = []
+        params: list[Any] = [symbol.strip().upper(), int(limit)]
         if start_date is None:
             clauses.append("start_date IS NULL")
         else:
@@ -317,14 +323,19 @@ class MarketDuckDB:
         safe_end = _optional_date(end_date)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         payload_json = json.dumps(payload, ensure_ascii=False, default=str)
-        where_sql, date_params = self._technical_where_clause(safe_start, safe_end)
+        where_sql, where_params = self._technical_where_clause(
+            symbol=normalized,
+            limit=limit,
+            start_date=safe_start,
+            end_date=safe_end,
+        )
 
         with self.connect() as conn:
             conn.execute("BEGIN TRANSACTION")
             try:
                 conn.execute(
                     f"DELETE FROM technical_cache WHERE {where_sql}",
-                    [normalized, int(limit), *date_params],
+                    where_params,
                 )
                 conn.execute(
                     """
@@ -360,7 +371,12 @@ class MarketDuckDB:
         normalized = symbol.strip().upper()
         safe_start = _optional_date(start_date)
         safe_end = _optional_date(end_date)
-        where_sql, date_params = self._technical_where_clause(safe_start, safe_end)
+        where_sql, where_params = self._technical_where_clause(
+            symbol=normalized,
+            limit=limit,
+            start_date=safe_start,
+            end_date=safe_end,
+        )
 
         with self.connect() as conn:
             record = conn.execute(
@@ -370,7 +386,7 @@ class MarketDuckDB:
                 WHERE {where_sql}
                 LIMIT 1
                 """,
-                [normalized, int(limit), *date_params],
+                where_params,
             ).fetchone()
 
         if record is None:
@@ -847,6 +863,25 @@ class MarketDuckDB:
             "completed_at": row[10].isoformat() if row[10] else None,
         }
 
+    def load_ai_jobs_by_status(self, status: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT job_id
+                FROM ai_generation_jobs
+                WHERE status = ?
+                ORDER BY created_at
+                """,
+                [status],
+            ).fetchall()
+
+        jobs: list[dict[str, Any]] = []
+        for (job_id,) in rows:
+            job = self.load_ai_generation_job(str(job_id))
+            if job is not None:
+                jobs.append(job)
+        return jobs
+
 
 class LazyMarketDuckDB:
     def __init__(self):
@@ -1051,6 +1086,9 @@ class LazyMarketDuckDB:
 
     def load_ai_generation_job(self, job_id: str) -> dict[str, Any] | None:
         return self._get_repo().load_ai_generation_job(job_id)
+
+    def load_ai_jobs_by_status(self, status: str) -> list[dict[str, Any]]:
+        return self._get_repo().load_ai_jobs_by_status(status)
 
 
 market_repo = LazyMarketDuckDB()

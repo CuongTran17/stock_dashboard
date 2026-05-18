@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
     kaggle_api_url: str = ""
+    dnse_market_base_url: str = "https://openapi.dnse.com.vn"
+    dnse_market_api_key: str = ""
+    dnse_market_api_secret: str = ""
+    dnse_market_board_id: str = "G1"
+    dnse_tick_poll_interval_ms: int = Field(default=2000, ge=500, le=60000)
 
     etl_symbols: str = ""
     etl_lookback_days: int = Field(default=365, ge=1)

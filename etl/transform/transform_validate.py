@@ -303,6 +303,8 @@ def enforce_publish_quality_gate(
     }
 
     if gate_errors:
+        report["status"] = "failed"
         raise QualityContractError("; ".join(gate_errors))
 
+    report["status"] = "passed"
     return report
