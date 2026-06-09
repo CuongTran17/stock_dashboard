@@ -294,6 +294,16 @@ App.vue
 
 Các trang đang dùng luồng giá tập trung gồm Dashboard, Stock Detail, My Portfolio, Portfolio Alerts, Stock Screener và News Events. Xem mô tả chi tiết tại `docs/frontend-realtime-architecture.md`.
 
+## Quy Ước Dữ Liệu Frontend
+
+Frontend không hiển thị dữ liệu mẫu trong các màn hình nghiệp vụ. Nếu backend/API không có dữ liệu thật, UI phải dùng empty state rõ ràng thay vì hard-code mã cổ phiếu, vị thế, cảnh báo hoặc notification giả.
+
+- `Portfolio Alerts` đọc danh mục từ `GET /api/portfolio/`. Vị thế lấy từ `quantity` và `avg_price`; cảnh báo giá được suy ra từ `tp_price` và `sl_price`. Nếu danh mục rỗng, trang hiển thị empty state và không render FPT/VCB/HPG/MBB mẫu.
+- `Stock Detail` chỉ hiển thị `Portfolio Performance` khi user đang nắm giữ mã hiện tại trong portfolio (`quantity > 0`). Nếu chưa có mã đó trong danh mục, section này được ẩn và phần định giá giãn full width.
+- Notification menu mặc định không có thông báo mẫu. Khi chưa có nguồn notification thật, dropdown hiển thị `No notifications`.
+- Các mapping dùng chung như nhóm ngành thị trường và default route chi tiết cổ phiếu nằm trong `src/constants/`, không khai báo lặp lại trực tiếp trong từng page.
+- `src/services/dnseApi.ts` là đường gọi DNSE trực tiếp từ browser đã được đánh dấu deprecated. Luồng production nên đi qua backend-backed services như `stockBackendApi` hoặc `dnseTickSandboxApi`.
+
 ## Cách Chạy ETL
 
 ETL entrypoint chính là:
@@ -309,6 +319,47 @@ Incremental tự tìm snapshot mới nhất trong `lake\processed`, lùi lại m
 ```powershell
 .\.venv\Scripts\python.exe -m etl.run_etl --symbols FPT,VCB,VIC --run-mode incremental --incremental-overlap-days 7 --tick-source lake
 ```
+
+Khi `--tick-source lake` hoặc `--tick-source auto`, ETL mặc định chạy thêm phase `dnse_tick_backfill` trước bước aggregate tick sang daily OHLCV. Phase này gọi DNSE historical trades endpoint cho phiên giao dịch hoàn tất gần nhất, lưu tick theo từng mã vào Parquet rồi dùng các file đó cho chart phút/giờ và tick -> EOD.
+
+Quy tắc chọn phiên:
+
+- Nếu chạy sau 15:00 vào ngày giao dịch, ETL lấy phiên cùng ngày.
+- Nếu chạy trước 15:00, cuối tuần hoặc ngày nghỉ, ETL lấy phiên giao dịch hoàn tất gần nhất trước đó.
+- Nếu file tick Parquet của mã đã có dữ liệu `source=dnse_historical`, ETL bỏ qua mã đó để tránh refetch. Dùng `--force-dnse-tick-backfill` khi cần ghi đè.
+
+Nơi lưu tick historical:
+
+```text
+backend_v2\data_lake\ticks\YYYY-MM-DD\{SYMBOL}.parquet
+```
+
+Chạy riêng DNSE historical tick backfill cho phiên gần nhất:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.backfill_dnse_ticks --symbols FPT,VCB,VIC --latest-session
+```
+
+Chạy cho một ngày cụ thể:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.backfill_dnse_ticks --symbols FPT,VCB,VIC --session-date 2026-06-09
+```
+
+Ép refetch và ghi đè file đã có:
+
+```powershell
+.\.venv\Scripts\python.exe -m etl.backfill_dnse_ticks --symbols FPT --session-date 2026-06-09 --force
+```
+
+Trong metadata ETL, phase này ghi các chỉ số:
+
+- `dnse_tick_backfilled_symbols`
+- `dnse_tick_existing_symbols`
+- `dnse_tick_empty_symbols`
+- `dnse_tick_backfill_session_date`
+
+Backend `/api/stocks/{symbol}/intraday` và `/api/stocks/{symbol}/ticks` có fallback đọc tick Parquet phiên gần nhất khi cache realtime rỗng. Vì vậy sau giờ giao dịch vẫn có thể mở chart phút/giờ của phiên gần nhất nếu tick backfill đã chạy thành công.
 
 ### Chạy full theo khoảng ngày
 
@@ -351,6 +402,9 @@ Tắt bớt nguồn nặng như fundamental hoặc Google News:
 | `--incremental-overlap-days 7` | Số ngày overlap khi incremental |
 | `--max-workers 6` | Số worker extract song song |
 | `--tick-source lake` | Nguồn tick để aggregate EOD: `lake`, `redis`, `auto` |
+| `--disable-dnse-tick-backfill` | Bỏ qua phase kéo DNSE historical ticks trước khi aggregate tick |
+| `--dnse-tick-session-date YYYY-MM-DD` | Kéo tick DNSE cho phiên cụ thể thay vì phiên hoàn tất gần nhất |
+| `--force-dnse-tick-backfill` | Refetch và ghi đè file tick Parquet đã có |
 | `--disable-fundamental` | Không extract báo cáo tài chính |
 | `--disable-google-news` | Không extract Google News |
 | `--disable-mysql-load` | Không load cache vào MySQL |
@@ -654,7 +708,7 @@ npm run type-check
 npm run build-only
 ```
 
-Unit test realtime frontend bao phủ registry symbol, cập nhật shared price store, lifecycle/fallback của realtime manager và DNSE WebSocket service.
+Unit test frontend bao phủ registry symbol, cập nhật shared price store, lifecycle/fallback của realtime manager, DNSE WebSocket service, Portfolio Alerts không dùng dữ liệu mẫu, Stock Detail chỉ hiện Portfolio Performance khi user có holding, và các constants dùng chung.
 
 Backend/ETL compile:
 

@@ -8,10 +8,15 @@ import pandas as pd
 
 from etl.config import EtlConfig
 from etl.backfill_dnse_ticks import backfill_dnse_ticks_for_session
-from etl.run_etl import _resolve_incremental_cfg
+from etl.run_etl import _build_argparser, _resolve_incremental_cfg
 
 
 class IncrementalConfigTests(unittest.TestCase):
+    def test_cli_default_end_date_uses_today(self):
+        parsed = _build_argparser().parse_args([])
+
+        self.assertEqual(parsed.end_date, date.today().isoformat())
+
     def test_resolves_incremental_start_from_latest_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             lake_dir = Path(tmp) / "lake"

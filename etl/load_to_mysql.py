@@ -116,7 +116,7 @@ def load_financial_cache(cfg: EtlConfig) -> int:
             else:
                 payload = _read_json(_raw_json_path(cfg, f"fundamental/{report_type}", symbol))
                 source = f"etl-vnstock-{report_type}"
-            if isinstance(payload, list):
+            if isinstance(payload, list) and payload:
                 records.append(
                     {
                         "symbol": symbol.upper(),

@@ -77,12 +77,13 @@
       </div>
 
       <div class="grid grid-cols-12 gap-4 md:gap-6">
-        <section class="col-span-12 xl:col-span-8">
+        <section v-if="hasPortfolioPositionForSymbol" class="col-span-12 xl:col-span-8">
           <PortfolioChart :symbol="symbol" :historical-data="chartHistory" />
         </section>
 
         <section
           class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
+          :class="{ 'xl:col-span-12': !hasPortfolioPositionForSymbol }"
         >
           <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Tổng quan định giá</h2>
           <div class="space-y-3">
@@ -339,6 +340,7 @@ import TradingViewChart from '@/components/stock/TradingViewChart.vue'
 import OrderLog from '@/components/stock/OrderLog.vue'
 import { VN30_TICKERS, useStockData } from '@/composables/useStockData'
 import { usePriceSubscription } from '@/composables/usePriceSubscription'
+import { getMyPortfolio, type PortfolioItem } from '@/services/authApi'
 import {
   stockBackendApi,
   type CompanyOverview,
@@ -425,6 +427,7 @@ const overview = ref<CompanyOverview | null>(null)
 const financialRows = ref<Record<string, unknown>[]>([])
 const googleNewsItems = ref<MarketNewsItem[]>([])
 const vnstockEvents = ref<MarketEventItem[]>([])
+const portfolioItems = ref<PortfolioItem[]>([])
 const orderTicks = ref<OrderTick[]>([])
 const orderTicksCount = ref(0)
 const orderIsInSession = ref(false)
@@ -496,6 +499,10 @@ const chartHistory = computed(() => historySeries.value.map((item) => ({
   time: item.time,
   close: item.close,
 })))
+
+const hasPortfolioPositionForSymbol = computed(() =>
+  portfolioItems.value.some((item) => item.symbol === symbol.value && item.quantity > 0),
+)
 
 const activeChartGroupConfig = computed(() => (
   CHART_TIMEFRAME_GROUPS.find((group) => group.value === activeChartGroup.value) || CHART_TIMEFRAME_GROUPS[2]
@@ -753,6 +760,15 @@ async function loadNewsAndEvents(forceRefresh: boolean = false): Promise<void> {
     vnstockEvents.value = eventsResult.status === 'fulfilled' ? eventsResult.value.data : []
   } finally {
     loadingNews.value = false
+  }
+}
+
+async function loadPortfolio(): Promise<void> {
+  try {
+    const response = await getMyPortfolio()
+    portfolioItems.value = response.items
+  } catch {
+    portfolioItems.value = []
   }
 }
 
@@ -1070,7 +1086,7 @@ watch(chartTimeframe, () => {
 })
 
 onMounted(async () => {
-  await fetchInitialData()
+  await Promise.all([fetchInitialData(), loadPortfolio()])
   await reloadSymbolData()
   scheduleOrderLogAutoRefresh()
 

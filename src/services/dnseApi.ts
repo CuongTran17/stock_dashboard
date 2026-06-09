@@ -53,6 +53,10 @@ export interface AuthTokens {
   expiresIn: number
 }
 
+/**
+ * @deprecated Direct DNSE browser calls are not part of the production data path.
+ * Use backend-backed services such as stockBackendApi or dnseTickSandboxApi instead.
+ */
 class DnseApiService {
   private accessToken: string | null = null
   private tokenExpiry: number = 0

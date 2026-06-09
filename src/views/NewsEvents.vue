@@ -222,6 +222,7 @@ import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { useStockData, VN30_TICKERS } from '@/composables/useStockData'
 import { usePriceSubscription } from '@/composables/usePriceSubscription'
 import { stockBackendApi } from '@/services/stockBackendApi'
+import { MARKET_SECTORS, sectorForSymbol, type SectorDefinition } from '@/constants/marketSectors'
 
 type ImpactLevel = 'High' | 'Medium' | 'Low'
 type NewsMode = 'all' | 'hot' | 'normal'
@@ -247,21 +248,7 @@ interface EventItem {
   symbol: string
 }
 
-interface SectorDefinition {
-  name: string
-  symbols: string[]
-}
-
-const sectors: SectorDefinition[] = [
-  { name: 'Banking', symbols: ['ACB', 'BID', 'CTG', 'MBB', 'SHB', 'SSB', 'STB', 'TCB', 'TPB', 'VCB', 'VIB', 'VPB'] },
-  { name: 'Real Estate', symbols: ['BCM', 'VHM', 'VIC', 'VRE'] },
-  { name: 'Energy', symbols: ['GAS', 'PLX', 'POW'] },
-  { name: 'Industrial', symbols: ['GVR', 'HPG'] },
-  { name: 'Consumer', symbols: ['MSN', 'MWG', 'SAB', 'VNM'] },
-  { name: 'Transportation', symbols: ['VJC'] },
-  { name: 'Insurance', symbols: ['BVH'] },
-  { name: 'Securities', symbols: ['SSI'] },
-]
+const sectors: SectorDefinition[] = MARKET_SECTORS
 
 const hotKeywords = [
   'lãi',
@@ -450,7 +437,7 @@ function impactClass(impact: ImpactLevel): string {
 }
 
 function sectorForSymbols(symbols: string[]): string {
-  const found = sectors.find((sector) => symbols.some((symbol) => sector.symbols.includes(symbol)))
+  const found = symbols.map((symbol) => sectorForSymbol(symbol)).find(Boolean)
   return found?.name || 'VN30'
 }
 

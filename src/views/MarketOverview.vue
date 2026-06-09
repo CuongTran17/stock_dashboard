@@ -117,6 +117,13 @@
         />
       </section>
 
+      <TechnicalAnalysisChart
+        :symbol="activeIndexSymbol"
+        value-unit="điểm"
+        y-axis-title="Điểm"
+        :fetch-technical="getActiveIndexTechnicalAnalysis"
+      />
+
       <div class="grid grid-cols-12 gap-4 md:gap-6">
         <section
           class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-8"
@@ -238,13 +245,17 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
+import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vue'
 import TradingViewChart from '@/components/stock/TradingViewChart.vue'
 import { VN30_TICKERS } from '@/composables/useStockData'
+import { MARKET_SECTORS, type SectorDefinition } from '@/constants/marketSectors'
+import { fetchMarketIndexTechnicalAnalysis } from '@/services/marketIndexTechnical'
 import {
   stockBackendApi,
   type HistoricalRecord,
   type MarketIndexQuote,
   type StockSnapshot,
+  type TechnicalResponse,
 } from '@/services/stockBackendApi'
 
 interface IndexCard {
@@ -261,11 +272,6 @@ interface MarketStock {
   price: number
   changePercent: number
   dataStatus?: string
-}
-
-interface SectorDefinition {
-  name: string
-  symbols: string[]
 }
 
 const CHART_TIMEFRAMES = [
@@ -296,16 +302,7 @@ const isRefreshing = ref(false)
 const refreshError = ref<string | null>(null)
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
 
-const sectors: SectorDefinition[] = [
-  { name: 'Banking', symbols: ['ACB', 'BID', 'CTG', 'MBB', 'SHB', 'SSB', 'STB', 'TCB', 'TPB', 'VCB', 'VIB', 'VPB'] },
-  { name: 'Real Estate', symbols: ['BCM', 'VHM', 'VIC', 'VRE'] },
-  { name: 'Energy', symbols: ['GAS', 'PLX', 'POW'] },
-  { name: 'Industrial', symbols: ['GVR', 'HPG'] },
-  { name: 'Consumer', symbols: ['MSN', 'MWG', 'SAB', 'VNM'] },
-  { name: 'Transportation', symbols: ['VJC'] },
-  { name: 'Insurance', symbols: ['BVH'] },
-  { name: 'Securities', symbols: ['SSI'] },
-]
+const sectors: SectorDefinition[] = MARKET_SECTORS
 
 const allStocks = computed<MarketStock[]>(() =>
   marketStocks.value
@@ -467,6 +464,10 @@ async function loadActiveIndexHistory(refresh: boolean = false): Promise<void> {
   } finally {
     chartLoading.value = false
   }
+}
+
+async function getActiveIndexTechnicalAnalysis(symbol: string, limit: number): Promise<TechnicalResponse | null> {
+  return fetchMarketIndexTechnicalAnalysis(symbol, limit, false)
 }
 
 function selectIndex(symbol: string): void {

@@ -1,8 +1,8 @@
 <template>
   <div
-    class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6"
+    class="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
   >
-    <div class="flex items-center justify-between mb-5">
+    <div class="mb-5 flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Danh mục theo dõi</h3>
 
       <div class="relative h-fit">
@@ -27,77 +27,83 @@
       </div>
     </div>
 
-    <!-- Watchlist items -->
-    <div class="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar">
+    <div class="max-h-[400px] space-y-2 overflow-y-auto custom-scrollbar">
       <div
         v-for="stock in sortedStocks"
         :key="stock.symbol"
-        class="flex items-center justify-between p-3 rounded-xl transition-colors hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer"
+        class="group flex w-full items-center justify-between rounded-lg p-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-white/5"
         @click="$emit('select', stock.symbol)"
       >
-        <div class="flex items-center gap-3">
-          <!-- Logo -->
+        <div class="flex min-w-0 items-center gap-3">
           <div
-            class="flex items-center justify-center w-10 h-10 rounded-full text-white font-bold text-sm"
+            class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white"
             :style="{ backgroundColor: stock.logoColor || '#465FFF' }"
           >
             {{ stock.symbol.substring(0, 2) }}
           </div>
 
-          <!-- Symbol + Company -->
-          <div>
-            <h4 class="font-semibold text-sm text-gray-800 dark:text-white/90">
+          <div class="min-w-0">
+            <h4 class="text-sm font-semibold text-gray-800 dark:text-white/90">
               {{ stock.symbol }}
             </h4>
-            <p class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[100px]">
+            <p class="max-w-[120px] truncate text-xs text-gray-500 dark:text-gray-400">
               {{ stock.companyName }}
             </p>
           </div>
         </div>
 
-        <!-- Price + Change -->
-        <div class="text-right">
-          <p class="font-semibold text-sm text-gray-800 dark:text-white/90">
-            {{ formatStockPrice(stock) }}
-          </p>
-          <span
-            :class="[
-              'text-xs font-medium',
-              stock.changePercent >= 0
-                ? 'text-success-600 dark:text-success-500'
-                : 'text-error-600 dark:text-error-500',
-            ]"
+        <div class="ml-3 flex shrink-0 items-center gap-3">
+          <div class="text-right">
+            <p class="text-sm font-semibold text-gray-800 dark:text-white/90">
+              {{ formatStockPrice(stock) }}
+            </p>
+            <span
+              :class="[
+                'text-xs font-medium',
+                stock.changePercent >= 0
+                  ? 'text-success-600 dark:text-success-500'
+                  : 'text-error-600 dark:text-error-500',
+              ]"
+            >
+              {{ stock.changePercent >= 0 ? '↑' : '↓' }}
+              {{ Math.abs(stock.changePercent).toFixed(2) }}%
+            </span>
+          </div>
+          <button
+            class="rounded-md p-1 text-gray-400 opacity-0 transition hover:bg-gray-100 hover:text-error-600 group-hover:opacity-100 dark:hover:bg-white/10"
+            type="button"
+            aria-label="Xóa khỏi danh mục theo dõi"
+            @click.stop="$emit('remove', stock.symbol)"
           >
-            {{ stock.changePercent >= 0 ? '↑' : '↓' }}
-            {{ Math.abs(stock.changePercent).toFixed(2) }}%
-          </span>
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      <!-- Empty state -->
       <div
         v-if="!stocks || stocks.length === 0"
-        class="text-center py-8 text-gray-400 dark:text-gray-500"
+        class="rounded-lg border border-dashed border-gray-200 py-8 text-center text-gray-400 dark:border-gray-700 dark:text-gray-500"
       >
-        <p class="text-sm">Chưa có mã nào trong watchlist</p>
-        <p class="text-xs mt-1">Thêm mã cổ phiếu để theo dõi</p>
+        <p class="text-sm">Chưa có mã nào trong danh mục theo dõi</p>
+        <p class="mt-1 text-xs">Thêm mã cổ phiếu để theo dõi</p>
       </div>
     </div>
 
-    <!-- Add stock input -->
-    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+    <div class="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
       <div class="flex gap-2">
         <input
           v-model="newSymbol"
           type="text"
           placeholder="Thêm mã CK (VD: FPT)"
-          class="flex-1 rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:text-white/90"
-          @keyup.enter="addSymbol"
+          class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:text-white/90"
           maxlength="10"
+          @keyup.enter="addSymbol"
         />
         <button
+          class="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-600"
           @click="addSymbol"
-          class="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
         >
           Thêm
         </button>
@@ -119,11 +125,13 @@ const emit = defineEmits<{
   (e: 'select', symbol: string): void
   (e: 'add', symbol: string): void
   (e: 'remove', symbol: string): void
+  (e: 'clear'): void
 }>()
 
 const menuItems = [
   { label: 'Sắp xếp theo giá', onClick: () => { sortMode.value = 'price' } },
   { label: 'Sắp xếp theo % thay đổi', onClick: () => { sortMode.value = 'changePercent' } },
+  { label: 'Xóa toàn bộ', onClick: () => { emit('clear') } },
 ]
 
 const newSymbol = ref('')

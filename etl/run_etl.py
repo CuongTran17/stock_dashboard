@@ -483,7 +483,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         description="ETL pipeline: Extract -> Transform -> Load market_data.csv",
     )
     parser.add_argument("--start-date", default="2025-04-01")
-    parser.add_argument("--end-date", default="2026-04-01")
+    parser.add_argument("--end-date", default=date.today().isoformat())
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS))
     parser.add_argument("--text-mode", default="dense", choices=["dense", "raw"])
     parser.add_argument("--output", default="market_data.csv")

@@ -27,7 +27,6 @@ export const VN30_TICKERS = [
   'VIC', 'VJC', 'VNM', 'VPB', 'VRE',
 ]
 
-export const DEFAULT_WATCHLIST = ['FPT', 'VNM', 'VCB', 'HPG', 'MBB', 'TCB', 'VIC', 'MSN']
 export const FEATURED_STOCKS = ['FPT', 'VNM', 'VCB', 'HPG']
 
 const WATCHLIST_STORAGE_KEY = 'stockai_watchlist'
@@ -168,13 +167,13 @@ function normalizeSymbols(symbols: string[]): string[] {
 function loadSavedWatchlist(): string[] {
   try {
     const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY)
-    if (!raw) return [...DEFAULT_WATCHLIST]
+    if (!raw) return []
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return [...DEFAULT_WATCHLIST]
+    if (!Array.isArray(parsed)) return []
     const symbols = normalizeSymbols(parsed)
-    return symbols.length > 0 ? symbols : [...DEFAULT_WATCHLIST]
+    return symbols
   } catch {
-    return [...DEFAULT_WATCHLIST]
+    return []
   }
 }
 
@@ -445,6 +444,10 @@ function createStockDataStore() {
     watchlist.value = watchlist.value.filter((item) => item !== symbol.toUpperCase())
   }
 
+  function clearWatchlist(): void {
+    watchlist.value = []
+  }
+
   async function getHistoricalData(
     symbol: string,
     resolution: string = '1D',
@@ -539,6 +542,7 @@ function createStockDataStore() {
     fetchInitialData,
     addToWatchlist,
     removeFromWatchlist,
+    clearWatchlist,
     getHistoricalData,
     getTechnicalAnalysis,
   }

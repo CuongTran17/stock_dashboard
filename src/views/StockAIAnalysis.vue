@@ -393,10 +393,16 @@ import {
   type StockSnapshot,
   type TechnicalResponse,
 } from '@/services/stockBackendApi'
+import {
+  DECISION_ORDER,
+  MODEL_LABELS,
+  NEGATIVE_TOKENS,
+  POSITIVE_TOKENS,
+  type Decision,
+} from '@/constants/stockAiAnalysis'
 
 type ViewMode = 'dashboard' | 'ai-analysis'
 type AnalysisTab = 'full' | 'technical' | 'fundamental' | 'sentiment' | 'conclusion'
-type Decision = 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell'
 type AppStatus = 'connected' | 'disconnected' | 'analyzing'
 type AlertType = 'success' | 'error' | 'info'
 
@@ -448,36 +454,6 @@ function normalizeBackendUrl(rawUrl?: string): string {
 }
 
 const BACKEND_FALLBACK = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
-const POSITIVE_TOKENS = [
-  'tang',
-  'tich cuc',
-  'vuot ke hoach',
-  'mua',
-  'breakout',
-  'mo rong',
-  'ky luc',
-  'lai',
-  'profit',
-  'growth',
-  'upgrade',
-  'dividend',
-  'co tuc',
-]
-const NEGATIVE_TOKENS = [
-  'giam',
-  'rui ro',
-  'ban',
-  'ap luc',
-  'thua lo',
-  'dieu tra',
-  'downgrade',
-  'warning',
-  'sell',
-  'bearish',
-  'suy yeu',
-  'volatility spike',
-]
-const DECISION_ORDER: Decision[] = ['Strong Buy', 'Buy', 'Hold', 'Sell', 'Strong Sell']
 
 const currentView = ref<ViewMode>('dashboard')
 const activeTab = ref<AnalysisTab>('full')
@@ -723,7 +699,7 @@ function createEmptyAnalysis(): GeneratedAnalysis {
   return {
     decision: 'Hold',
     confidence: 0,
-    model: 'VN30 Analyst AI',
+    model: MODEL_LABELS.primary,
     full: '',
     technical: '',
     fundamental: '',
@@ -1364,7 +1340,7 @@ function buildAnalysis(): GeneratedAnalysis {
   return {
     decision,
     confidence,
-    model: 'VN30 Analyst AI (rule-based)',
+    model: MODEL_LABELS.ruleBased,
     full,
     technical: technicalLines.join('\n'),
     fundamental: fundamentalLines.join('\n'),
@@ -1423,7 +1399,7 @@ function buildBacktestRecords(): BacktestRecord[] {
 
     records.push({
       date: parsedRows[index].date,
-      model: 'VN30 Analyst AI',
+      model: MODEL_LABELS.primary,
       decision,
       confidence,
       return5d,

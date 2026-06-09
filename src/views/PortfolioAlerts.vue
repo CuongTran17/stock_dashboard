@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <AdminLayout>
     <div class="space-y-6">
       <div class="flex flex-col gap-2">
@@ -31,7 +31,16 @@
       <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
         <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Vị thế</h2>
 
-        <div class="overflow-x-auto">
+        <div v-if="loading" class="py-6 text-sm text-gray-500 dark:text-gray-400">
+          Đang tải danh mục...
+        </div>
+        <div v-else-if="errorMessage" class="py-6 text-sm text-error-600">
+          {{ errorMessage }}
+        </div>
+        <div v-else-if="enrichedPositions.length === 0" class="py-6 text-sm text-gray-500 dark:text-gray-400">
+          Chưa có vị thế
+        </div>
+        <div v-else class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
@@ -70,42 +79,24 @@
         <section class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-7">
           <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Cảnh báo giá</h2>
 
-          <form class="grid grid-cols-1 gap-3 md:grid-cols-4" @submit.prevent="addAlert">
-            <input
-              v-model="newAlert.symbol"
-              type="text"
-              placeholder="Mã cổ phiếu"
-              class="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700"
-            />
-            <select
-              v-model="newAlert.direction"
-              class="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700"
-            >
-              <option value="above">Lớn hơn</option>
-              <option value="below">Nhỏ hơn</option>
-            </select>
-            <input
-              v-model.number="newAlert.targetPrice"
-              type="number"
-              min="0"
-              placeholder="Giá mục tiêu"
-              class="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm dark:border-gray-700"
-            />
-            <button
-              type="submit"
-              class="h-10 rounded-lg bg-brand-500 px-3 text-sm font-medium text-white hover:bg-brand-600"
-            >
-              Thêm cảnh báo
-            </button>
-          </form>
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            Cảnh báo được lấy từ mức TP/SL trong danh mục.
+          </p>
 
           <div class="mt-4 space-y-2">
+            <div v-if="alerts.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
+              Chưa có cảnh báo TP/SL
+            </div>
             <div
+              v-else
               v-for="alert in alerts"
               :key="alert.id"
               class="flex flex-col gap-2 rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between"
             >
               <div class="text-sm">
+                <span class="mr-2 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                  {{ alert.label }}
+                </span>
                 <span class="font-semibold text-gray-800 dark:text-white/90">{{ alert.symbol }}</span>
                 <span class="mx-1 text-gray-500 dark:text-gray-400">{{ alert.direction === 'above' ? '>' : '<' }}</span>
                 <span class="text-gray-700 dark:text-gray-300">{{ formatPrice(alert.targetPrice) }}</span>
@@ -122,12 +113,6 @@
                 >
                   {{ isTriggered(alert) ? 'Đã kích hoạt' : 'Đang theo dõi' }}
                 </span>
-                <button
-                  class="text-xs font-medium text-error-600"
-                  @click="removeAlert(alert.id)"
-                >
-                  Xóa
-                </button>
               </div>
             </div>
           </div>
@@ -158,53 +143,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { useStockData } from '@/composables/useStockData'
 import { usePriceSubscription } from '@/composables/usePriceSubscription'
-
-interface PortfolioPosition {
-  symbol: string
-  quantity: number
-  avgPrice: number
-}
+import { getMyPortfolio, type PortfolioItem } from '@/services/authApi'
 
 interface PriceAlert {
-  id: number
+  id: string
   symbol: string
   targetPrice: number
   direction: 'above' | 'below'
+  label: 'TP' | 'SL'
 }
 
 const {
   stocks,
   fetchInitialData,
-  addToWatchlist,
 } = useStockData()
 
-const positions = ref<PortfolioPosition[]>([
-  { symbol: 'FPT', quantity: 500, avgPrice: 120000 },
-  { symbol: 'VCB', quantity: 350, avgPrice: 90500 },
-  { symbol: 'HPG', quantity: 1500, avgPrice: 26100 },
-  { symbol: 'MBB', quantity: 1000, avgPrice: 23500 },
-])
-
-const alerts = ref<PriceAlert[]>([
-  { id: 1, symbol: 'FPT', targetPrice: 130000, direction: 'above' },
-  { id: 2, symbol: 'VCB', targetPrice: 90000, direction: 'below' },
-])
-
-const subscribedSymbols = computed(() => [
-  ...positions.value.map((position) => position.symbol),
-  ...alerts.value.map((alert) => alert.symbol),
-])
-usePriceSubscription('portfolio-alerts', () => subscribedSymbols.value)
-
-const newAlert = reactive({
-  symbol: 'FPT',
-  targetPrice: 0,
-  direction: 'above' as 'above' | 'below',
-})
+const positions = ref<PortfolioItem[]>([])
+const loading = ref(true)
+const errorMessage = ref('')
 
 const currentPriceMap = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
@@ -216,14 +176,53 @@ const currentPriceMap = computed<Record<string, number>>(() => {
   return map
 })
 
+const alerts = computed<PriceAlert[]>(() =>
+  positions.value.flatMap((item) => {
+    const result: PriceAlert[] = []
+    const tpPrice = toDisplayPrice(item.tp_price)
+    const slPrice = toDisplayPrice(item.sl_price)
+
+    if (tpPrice > 0) {
+      result.push({
+        id: `${item.symbol}-tp`,
+        symbol: item.symbol,
+        targetPrice: tpPrice,
+        direction: 'above',
+        label: 'TP',
+      })
+    }
+
+    if (slPrice > 0) {
+      result.push({
+        id: `${item.symbol}-sl`,
+        symbol: item.symbol,
+        targetPrice: slPrice,
+        direction: 'below',
+        label: 'SL',
+      })
+    }
+
+    return result
+  }),
+)
+
+const subscribedSymbols = computed(() => [
+  ...positions.value.map((position) => position.symbol),
+  ...alerts.value.map((alert) => alert.symbol),
+])
+usePriceSubscription('portfolio-alerts', () => subscribedSymbols.value)
+
 const enrichedPositions = computed(() =>
-  positions.value.map((position) => {
-    const currentPrice = currentPriceMap.value[position.symbol] || position.avgPrice
+  positions.value.filter((position) => position.quantity > 0).map((position) => {
+    const avgPrice = toDisplayPrice(position.avg_price)
+    const currentPrice = currentPriceMap.value[position.symbol] || avgPrice
     const marketValue = currentPrice * position.quantity
-    const totalCost = position.avgPrice * position.quantity
+    const totalCost = avgPrice * position.quantity
 
     return {
-      ...position,
+      symbol: position.symbol,
+      quantity: position.quantity,
+      avgPrice,
       currentPrice,
       marketValue,
       pnl: marketValue - totalCost,
@@ -255,6 +254,12 @@ function isTriggered(alert: PriceAlert): boolean {
   return currentPrice <= alert.targetPrice
 }
 
+function toDisplayPrice(raw: number | null | undefined): number {
+  const value = Number(raw || 0)
+  if (!Number.isFinite(value) || value <= 0) return 0
+  return value >= 1000 ? value : value * 1000
+}
+
 function formatPrice(value: number): string {
   return new Intl.NumberFormat('vi-VN', {
     minimumFractionDigits: 2,
@@ -270,34 +275,22 @@ function formatCurrency(value: number): string {
   }).format(value)
 }
 
-function addAlert(): void {
-  const symbol = newAlert.symbol.trim().toUpperCase()
-  if (!symbol || newAlert.targetPrice <= 0) return
-
-  const nextId = alerts.value.length > 0 ? Math.max(...alerts.value.map((item) => item.id)) + 1 : 1
-
-  alerts.value.push({
-    id: nextId,
-    symbol,
-    targetPrice: newAlert.targetPrice,
-    direction: newAlert.direction,
-  })
-
-  newAlert.targetPrice = 0
-}
-
-function removeAlert(id: number): void {
-  alerts.value = alerts.value.filter((alert) => alert.id !== id)
+async function loadPortfolio(): Promise<void> {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const data = await getMyPortfolio()
+    positions.value = data.items
+  } catch (error: any) {
+    errorMessage.value = error?.message || 'Không thể tải danh mục.'
+    positions.value = []
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(async () => {
-  await fetchInitialData()
-
-  const watchSymbols = new Set<string>()
-  positions.value.forEach((position) => watchSymbols.add(position.symbol))
-  alerts.value.forEach((alert) => watchSymbols.add(alert.symbol))
-  watchSymbols.forEach((symbol) => addToWatchlist(symbol))
-
+  await Promise.all([fetchInitialData(), loadPortfolio()])
 })
 
 </script>

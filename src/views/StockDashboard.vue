@@ -1,16 +1,15 @@
 <template>
   <admin-layout>
-    <div class="grid grid-cols-12 gap-4 md:gap-6">
-      <!-- Header with connection status -->
-      <div class="col-span-12 flex items-center justify-between">
+    <div class="grid grid-cols-12 items-start gap-5">
+      <div class="col-span-12 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 class="text-2xl font-bold text-gray-800 dark:text-white/90">
-            Stock Dashboard
+            Bảng điều khiển thị trường
           </h2>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            VN30 Market Data — DNSE Lightspeed
+          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Dữ liệu VN30 từ DNSE Lightspeed
           </p>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Dữ liệu cập nhật lần cuối: {{ formattedLastDataSync }}
           </p>
         </div>
@@ -32,14 +31,14 @@
 
       <div
         v-if="isLoading"
-        class="col-span-12 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700 dark:border-brand-800 dark:bg-brand-500/10 dark:text-brand-300"
+        class="col-span-12 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700 dark:border-brand-800 dark:bg-brand-500/10 dark:text-brand-300"
       >
         Đang tải dữ liệu thị trường mới nhất...
       </div>
 
       <div
         v-if="error"
-        class="col-span-12 rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-500/10 dark:text-warning-300"
+        class="col-span-12 rounded-lg border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-500/10 dark:text-warning-300"
       >
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <span>{{ error }}</span>
@@ -55,18 +54,19 @@
 
       <div
         v-if="dashboardDataError"
-        class="col-span-12 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-800 dark:bg-error-500/10 dark:text-error-300"
+        class="col-span-12 rounded-lg border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-800 dark:bg-error-500/10 dark:text-error-300"
       >
         {{ dashboardDataError }}
       </div>
 
-      <!-- Top Gainers / Top Losers -->
-      <div class="col-span-12 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-white/[0.03]">
+      <div class="col-span-12 rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
         <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Cổ Phiếu Tiêu Biểu VN30</h2>
-          <div class="inline-flex items-center gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+          <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">
+            Cổ phiếu tiêu biểu VN30
+          </h2>
+          <div class="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
             <button
-              class="rounded-lg px-4 py-1.5 text-sm font-medium transition-colors"
+              class="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
               :class="
                 activeTab === 'gainers'
                   ? 'bg-success-500 text-white shadow-sm'
@@ -74,10 +74,10 @@
               "
               @click="activeTab = 'gainers'"
             >
-              ↑ Top Tăng
+              ↑ Top tăng
             </button>
             <button
-              class="rounded-lg px-4 py-1.5 text-sm font-medium transition-colors"
+              class="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
               :class="
                 activeTab === 'losers'
                   ? 'bg-error-500 text-white shadow-sm'
@@ -85,19 +85,19 @@
               "
               @click="activeTab = 'losers'"
             >
-              ↓ Top Giảm
+              ↓ Top giảm
             </button>
           </div>
         </div>
 
-        <div v-if="snapshotsLoading" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-if="snapshotsLoading" class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           <div
             v-for="item in 8"
             :key="item"
-            class="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 dark:border-gray-800 dark:bg-white/[0.03]"
+            class="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-4 dark:border-gray-800 dark:bg-white/[0.03]"
           >
             <div class="flex items-center gap-3">
-              <div class="h-12 w-12 animate-pulse rounded-xl bg-gray-200 dark:bg-gray-700"></div>
+              <div class="h-12 w-12 animate-pulse rounded-lg bg-gray-200 dark:bg-gray-700"></div>
               <div>
                 <div class="h-4 w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
                 <div class="mt-2 h-3 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -114,26 +114,26 @@
           Không có dữ liệu. Hãy thử làm mới lại sau.
         </div>
 
-        <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           <button
             v-for="stock in displayedStocks"
             :key="stock.symbol"
-            class="flex items-center justify-between rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-gray-800 dark:bg-white/[0.03]"
+            class="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-4 text-left transition-colors hover:border-brand-200 hover:bg-white dark:border-gray-800 dark:bg-white/[0.03] dark:hover:border-brand-500/40 dark:hover:bg-white/[0.05]"
             @click="navigateToStock(stock.symbol)"
           >
-            <div class="flex items-center gap-3">
+            <div class="flex min-w-0 items-center gap-3">
               <div
-                class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl text-base font-bold text-white"
+                class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg text-base font-bold text-white"
                 :style="{ backgroundColor: symbolColor(stock.symbol) }"
               >
                 {{ stock.symbol.charAt(0) }}
               </div>
-              <div>
+              <div class="min-w-0">
                 <p class="text-base font-semibold text-gray-800 dark:text-white/90">{{ stock.symbol }}</p>
                 <p class="max-w-[150px] truncate text-sm text-gray-500 dark:text-gray-400">{{ stock.companyName || stock.symbol }}</p>
               </div>
             </div>
-            <div class="text-right">
+            <div class="ml-3 shrink-0 text-right">
               <p class="text-base font-semibold text-gray-800 dark:text-white/90">
                 {{ formatPrice(stock.price) }}
               </p>
@@ -148,24 +148,18 @@
         </div>
       </div>
 
-      <!-- Portfolio Performance Chart -->
-      <div class="col-span-12 xl:col-span-8">
-        <PortfolioChart :symbol="selectedSymbol" />
-      </div>
-
-      <!-- VNINDEX / VN30 quick cards -->
-      <div class="col-span-12 xl:col-span-4">
-        <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+      <div class="col-span-12">
+        <section class="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
           <div class="mb-4 flex items-center justify-between">
             <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90">Chỉ số nhanh</h3>
             <p class="text-xs text-gray-500 dark:text-gray-400">Nhấn để xem chi tiết</p>
           </div>
 
-          <div v-if="dashboardIndicesLoading" class="space-y-3">
+          <div v-if="dashboardIndicesLoading" class="grid gap-4 sm:grid-cols-2">
             <div
               v-for="item in 2"
               :key="item"
-              class="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/40"
+              class="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/40"
             >
               <div class="h-3 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
               <div class="mt-3 h-7 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -173,11 +167,11 @@
             </div>
           </div>
 
-          <div v-else class="space-y-3">
+          <div v-else class="grid gap-4 sm:grid-cols-2">
             <button
               v-for="item in dashboardIndexCards"
               :key="item.symbol"
-              class="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800/40"
+              class="w-full rounded-lg border border-gray-200 bg-gray-50 p-4 text-left transition-colors hover:border-brand-300 hover:bg-white dark:border-gray-700 dark:bg-gray-800/40 dark:hover:bg-white/[0.05]"
               @click="goToMarketOverview(item.symbol)"
             >
               <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ item.name }}</p>
@@ -187,33 +181,33 @@
               </p>
             </button>
 
-            <div v-if="dashboardIndexCards.length === 0" class="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <div v-if="dashboardIndexCards.length === 0" class="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
               Chưa có dữ liệu chỉ số từ backend.
             </div>
           </div>
         </section>
       </div>
 
-      <!-- Watchlist -->
       <div class="col-span-12 xl:col-span-4">
         <StockWatchlist
           :stocks="watchlistStocks"
           @select="navigateToStock"
           @add="addToWatchlist"
           @remove="removeFromWatchlist"
+          @clear="clearWatchlist"
         />
       </div>
 
-      <!-- Market Overview Table -->
       <div class="col-span-12 xl:col-span-8">
         <MarketOverview :stocks="allStocksArray" @select="navigateToStock" />
       </div>
 
-      <!-- Technical Analysis Chart (full width) -->
       <div class="col-span-12">
         <TechnicalAnalysisChart
-          :symbol="selectedSymbol"
-          :fetch-technical="getTechnicalAnalysis"
+          symbol="VNINDEX"
+          value-unit="điểm"
+          y-axis-title="Điểm"
+          :fetch-technical="getVnindexTechnicalAnalysis"
         />
       </div>
     </div>
@@ -224,14 +218,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
-import PortfolioChart from '@/components/stock/PortfolioChart.vue'
 import StockWatchlist from '@/components/stock/StockWatchlist.vue'
 import MarketOverview from '@/components/stock/MarketOverview.vue'
 import ConnectionStatus from '@/components/stock/ConnectionStatus.vue'
 import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vue'
 import { useStockData, VN30_TICKERS } from '@/composables/useStockData'
 import { usePriceSubscription } from '@/composables/usePriceSubscription'
-import { stockBackendApi, type MarketIndexQuote, type StockSnapshot } from '@/services/stockBackendApi'
+import { fetchMarketIndexTechnicalAnalysis } from '@/services/marketIndexTechnical'
+import { stockBackendApi, type MarketIndexQuote, type StockSnapshot, type TechnicalResponse } from '@/services/stockBackendApi'
 
 const router = useRouter()
 
@@ -249,14 +243,11 @@ const {
   fetchInitialData,
   addToWatchlist,
   removeFromWatchlist,
-  getTechnicalAnalysis,
+  clearWatchlist,
 } = useStockData()
 
 usePriceSubscription('stock-dashboard', () => [...featuredSymbols.value, ...watchlist.value])
 
-const selectedSymbol = ref('FPT')
-
-// ── Snapshot data for top movers ──────────────────────────────────────────────
 type FilterTab = 'gainers' | 'losers'
 
 const snapshots = ref<StockSnapshot[]>([])
@@ -322,6 +313,10 @@ async function loadDashboardIndices(): Promise<void> {
   } finally {
     dashboardIndicesLoading.value = false
   }
+}
+
+async function getVnindexTechnicalAnalysis(_symbol: string, limit: number): Promise<TechnicalResponse | null> {
+  return fetchMarketIndexTechnicalAnalysis('VNINDEX', limit, false)
 }
 
 const isDashboardRefreshing = computed(() =>
@@ -401,11 +396,6 @@ const formattedLastDataSync = computed(() => {
 })
 
 onMounted(async () => {
-  // 1. Tải dữ liệu ban đầu từ REST API
   await refreshDashboard()
-
-  // 2. Kết nối WebSocket cho real-time
-    // Fallback: polling mỗi 5 giây
 })
-
 </script>
