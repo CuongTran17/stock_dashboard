@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen xl:flex">
+  <div class="min-h-screen">
     <app-sidebar />
     <Backdrop />
     <div

@@ -213,7 +213,7 @@ def _alembic_config():
 
     config = Config(str(config_path))
     config.set_main_option("script_location", str(BASE_DIR / "alembic"))
-    config.set_main_option("sqlalchemy.url", DB_URL)
+    config.set_main_option("sqlalchemy.url", DB_URL.replace("%", "%%"))
     return config
 
 

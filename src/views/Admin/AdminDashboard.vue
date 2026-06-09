@@ -6,11 +6,28 @@
       </span>
     </PageHeader>
 
-    <div class="mx-auto max-w-7xl p-6">
-      <div class="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.03]">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Tabs quản trị</p>
-          <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+    <div class="mx-auto max-w-full px-6 py-6">
+      <div
+        class="grid gap-6 transition-all duration-300"
+        :class="isSidebarCollapsed ? 'lg:grid-cols-[80px_minmax(0,1fr)]' : 'lg:grid-cols-[280px_minmax(0,1fr)]'"
+      >
+        <aside
+          class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.03] transition-all duration-300 flex flex-col sticky top-24 self-start"
+          :class="isSidebarCollapsed ? 'lg:w-[80px] w-full' : 'w-full lg:w-[280px]'"
+        >
+          <div class="flex items-center" :class="isSidebarCollapsed ? 'justify-center' : 'justify-between'">
+            <p v-if="!isSidebarCollapsed" class="text-xs uppercase font-bold tracking-wide text-gray-500 dark:text-gray-400">Tabs quản trị</p>
+            <button
+              @click="isSidebarCollapsed = !isSidebarCollapsed"
+              class="hidden lg:block rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors"
+              title="Thu gọn / Mở rộng menu"
+            >
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+          <p v-if="!isSidebarCollapsed" class="mt-2 text-xs text-gray-400 leading-normal">
             Tập trung toàn bộ tác vụ quản trị trên một màn hình duy nhất.
           </p>
 
@@ -18,14 +35,26 @@
             <button
               v-for="tab in tabs"
               :key="tab.key"
-              class="flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors"
-              :class="activeTab === tab.key ? 'border-brand-500 bg-brand-50 dark:border-brand-500/60 dark:bg-brand-500/10' : 'border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:bg-gray-800'"
+              class="flex w-full items-center transition-all duration-200 rounded-xl border"
+              :class="[
+                activeTab === tab.key
+                  ? 'border-brand-500 bg-brand-50 dark:border-brand-500/60 dark:bg-brand-500/10'
+                  : 'border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-800/60 dark:hover:bg-gray-850',
+                isSidebarCollapsed ? 'p-2 justify-center' : 'px-4 py-3 items-start gap-3'
+              ]"
+              :title="isSidebarCollapsed ? tab.label : undefined"
               @click="setActiveTab(tab.key)"
             >
-              <span class="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold" :class="tab.badgeClass">
+              <span
+                class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-transform duration-200"
+                :class="[
+                  tab.badgeClass,
+                  isSidebarCollapsed ? 'scale-105' : 'mt-0.5'
+                ]"
+              >
                 {{ tab.shortLabel }}
               </span>
-              <span class="min-w-0">
+              <span v-if="!isSidebarCollapsed" class="min-w-0 text-left">
                 <span class="block text-sm font-semibold text-gray-800 dark:text-white/90">{{ tab.label }}</span>
                 <span class="mt-0.5 block text-xs leading-5 text-gray-500 dark:text-gray-400">{{ tab.description }}</span>
               </span>
@@ -120,6 +149,11 @@ const tabs: Array<{
 const route = useRoute()
 const router = useRouter()
 const activeTab = ref<AdminTab>('revenue')
+const isSidebarCollapsed = ref(localStorage.getItem('admin_sidebar_collapsed') === 'true')
+
+watch(isSidebarCollapsed, (newVal) => {
+  localStorage.setItem('admin_sidebar_collapsed', String(newVal))
+})
 
 const activeComponent = computed(() => {
   if (activeTab.value === 'users') return TabUsers

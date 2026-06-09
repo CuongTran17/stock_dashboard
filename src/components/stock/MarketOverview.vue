@@ -10,18 +10,74 @@
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-gray-200 dark:border-gray-700">
-            <th class="py-3 text-left font-medium text-gray-500 dark:text-gray-400">Mã CK</th>
-            <th class="py-3 text-right font-medium text-gray-500 dark:text-gray-400">Giá</th>
-            <th class="py-3 text-right font-medium text-gray-500 dark:text-gray-400">Thay đổi</th>
-            <th class="py-3 text-right font-medium text-gray-500 dark:text-gray-400">%</th>
-            <th class="py-3 text-right font-medium text-gray-500 dark:text-gray-400">KL</th>
-            <th class="py-3 text-right font-medium text-gray-500 dark:text-gray-400">Cao</th>
-            <th class="py-3 text-right font-medium text-gray-500 dark:text-gray-400">Thấp</th>
+            <th
+              class="cursor-pointer select-none py-3 text-left font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('symbol')"
+            >
+              Mã CK
+              <span v-if="sortKey === 'symbol'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
+            <th
+              class="cursor-pointer select-none py-3 text-right font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('price')"
+            >
+              Giá
+              <span v-if="sortKey === 'price'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
+            <th
+              class="cursor-pointer select-none py-3 text-right font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('change')"
+            >
+              Thay đổi
+              <span v-if="sortKey === 'change'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
+            <th
+              class="cursor-pointer select-none py-3 text-right font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('changePercent')"
+            >
+              %
+              <span v-if="sortKey === 'changePercent'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
+            <th
+              class="cursor-pointer select-none py-3 text-right font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('volume')"
+            >
+              KL
+              <span v-if="sortKey === 'volume'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
+            <th
+              class="cursor-pointer select-none py-3 text-right font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('high')"
+            >
+              Cao
+              <span v-if="sortKey === 'high'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
+            <th
+              class="cursor-pointer select-none py-3 text-right font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              @click="toggleSort('low')"
+            >
+              Thấp
+              <span v-if="sortKey === 'low'" class="inline-block ml-0.5 text-[10px]">
+                {{ sortOrder === 'asc' ? '▲' : '▼' }}
+              </span>
+            </th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="stock in stocks"
+            v-for="stock in sortedStocks"
             :key="stock.symbol"
             class="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-white/5"
             @click="$emit('select', stock.symbol)"
@@ -79,15 +135,52 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import type { StockState } from '@/composables/useStockData'
 
-defineProps<{
+const props = defineProps<{
   stocks: StockState[]
 }>()
 
 defineEmits<{
   (e: 'select', symbol: string): void
 }>()
+
+const sortKey = ref<string>('symbol')
+const sortOrder = ref<'asc' | 'desc'>('asc')
+
+function toggleSort(key: string) {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortOrder.value = 'asc'
+  }
+}
+
+const sortedStocks = computed(() => {
+  const result = [...props.stocks]
+  if (!sortKey.value) return result
+
+  return result.sort((a, b) => {
+    let valA: any = a[sortKey.value as keyof StockState]
+    let valB: any = b[sortKey.value as keyof StockState]
+
+    // Handle string (like symbol) case-insensitive
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      const cmp = valA.localeCompare(valB)
+      return sortOrder.value === 'asc' ? cmp : -cmp
+    }
+
+    // Handle numbers
+    const numA = Number(valA) || 0
+    const numB = Number(valB) || 0
+
+    if (numA < numB) return sortOrder.value === 'asc' ? -1 : 1
+    if (numA > numB) return sortOrder.value === 'asc' ? 1 : -1
+    return 0
+  })
+})
 
 function formatPrice(price: number): string {
   return new Intl.NumberFormat('vi-VN', {

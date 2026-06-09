@@ -77,27 +77,6 @@
       </div>
 
       <div class="grid grid-cols-12 gap-4 md:gap-6">
-        <section v-if="hasPortfolioPositionForSymbol" class="col-span-12 xl:col-span-8">
-          <PortfolioChart :symbol="symbol" :historical-data="chartHistory" />
-        </section>
-
-        <section
-          class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
-          :class="{ 'xl:col-span-12': !hasPortfolioPositionForSymbol }"
-        >
-          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Tổng quan định giá</h2>
-          <div class="space-y-3">
-            <div
-              v-for="metric in valuationCards"
-              :key="metric.label"
-              class="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 dark:border-gray-800"
-            >
-              <p class="text-sm text-gray-600 dark:text-gray-400">{{ metric.label }}</p>
-              <p class="text-sm font-semibold text-gray-800 dark:text-white/90">{{ metric.value }}</p>
-            </div>
-          </div>
-        </section>
-
         <section class="col-span-12">
           <TradingViewChart
             :symbol="symbol"
@@ -133,22 +112,50 @@
           </TradingViewChart>
         </section>
 
-        <section
-          class="col-span-12 flex flex-col rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
-          style="max-height: 480px"
-        >
-          <OrderLog
-            :ticks="orderTicks"
-            :total-count="orderTicksCount"
-            :is-in-session="orderIsInSession"
-            :loading="loadingOrderLog"
-            @refresh="loadOrderLog(true)"
-          />
-        </section>
+        <!-- Cột trái: Sổ lệnh & Tổng quan định giá -->
+        <div class="col-span-12 xl:col-span-4 flex flex-col gap-4 md:gap-6">
+          <section
+            class="flex flex-col rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
+            style="max-height: 480px"
+          >
+            <OrderLog
+              :ticks="orderTicks"
+              :total-count="orderTicksCount"
+              :is-in-session="orderIsInSession"
+              :loading="loadingOrderLog"
+              @refresh="loadOrderLog(true)"
+            />
+          </section>
 
-        <section class="col-span-12 xl:col-span-8">
-          <TechnicalAnalysisChart :symbol="symbol" :fetch-technical="getTechnicalAnalysis" :refresh-token="technicalRefreshToken" />
-        </section>
+          <section
+            class="flex-1 flex flex-col rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Tổng quan định giá</h2>
+            <div class="space-y-3 flex-1 flex flex-col">
+              <div
+                v-for="metric in valuationCards"
+                :key="metric.label"
+                class="flex flex-1 items-center justify-between rounded-xl border border-gray-100 px-4 py-2 dark:border-gray-800 hover:bg-gray-50/30 dark:hover:bg-white/[0.01] transition-colors"
+              >
+                <p class="text-sm text-gray-600 dark:text-gray-400">{{ metric.label }}</p>
+                <p class="text-sm font-semibold text-gray-800 dark:text-white/90">{{ metric.value }}</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Cột phải: Phân tích kỹ thuật & Biểu đồ danh mục -->
+        <div class="col-span-12 xl:col-span-8 flex flex-col gap-4 md:gap-6">
+          <section>
+            <TechnicalAnalysisChart :symbol="symbol" :fetch-technical="getTechnicalAnalysis" :refresh-token="technicalRefreshToken" />
+          </section>
+
+          <section v-if="hasPortfolioPositionForSymbol">
+            <PortfolioChart :symbol="symbol" :historical-data="chartHistory" />
+          </section>
+        </div>
+
+
 
         <section class="col-span-12 grid gap-4 xl:grid-cols-2">
           <div class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">

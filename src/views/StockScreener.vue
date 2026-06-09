@@ -100,14 +100,78 @@
           <table class="w-full text-left text-sm">
             <thead>
               <tr class="border-b border-gray-200 dark:border-gray-700">
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Mã</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Giá</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Biến động</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">RSI</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">MACD</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">Tín hiệu</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">P/E</th>
-                <th class="px-3 py-2 font-medium text-gray-500 dark:text-gray-400">P/B</th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('symbol')"
+                >
+                  Mã
+                  <span v-if="sortKey === 'symbol'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('price')"
+                >
+                  Giá
+                  <span v-if="sortKey === 'price'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('changePercent')"
+                >
+                  Biến động
+                  <span v-if="sortKey === 'changePercent'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('rsi')"
+                >
+                  RSI
+                  <span v-if="sortKey === 'rsi'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('macd')"
+                >
+                  MACD
+                  <span v-if="sortKey === 'macd'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('signalSummary')"
+                >
+                  Tín hiệu
+                  <span v-if="sortKey === 'signalSummary'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('pe')"
+                >
+                  P/E
+                  <span v-if="sortKey === 'pe'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
+                <th
+                  class="cursor-pointer select-none px-3 py-2 font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                  @click="toggleSort('pb')"
+                >
+                  P/B
+                  <span v-if="sortKey === 'pb'" class="inline-block ml-0.5 text-[10px]">
+                    {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -191,6 +255,19 @@ const maxPe = ref(100)
 const maxPb = ref(10)
 const bullishMacdOnly = ref(false)
 
+const sortKey = ref<string>('changePercent')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+function toggleSort(key: string) {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    // Default to desc for changePercent/RSI/PE/PB, asc for symbol/price/signal
+    sortOrder.value = ['changePercent', 'rsi', 'pe', 'pb'].includes(key) ? 'desc' : 'asc'
+  }
+}
+
 const filteredRows = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
 
@@ -227,7 +304,25 @@ const filteredRows = computed(() => {
 
       return true
     })
-    .sort((a, b) => b.changePercent - a.changePercent)
+    .sort((a, b) => {
+      const valA = a[sortKey.value as keyof ScreenerRow]
+      const valB = b[sortKey.value as keyof ScreenerRow]
+
+      if (valA === null || valA === undefined) return 1
+      if (valB === null || valB === undefined) return -1
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        const cmp = valA.localeCompare(valB)
+        return sortOrder.value === 'asc' ? cmp : -cmp
+      }
+
+      const numA = Number(valA) || 0
+      const numB = Number(valB) || 0
+
+      if (numA < numB) return sortOrder.value === 'asc' ? -1 : 1
+      if (numA > numB) return sortOrder.value === 'asc' ? 1 : -1
+      return 0
+    })
 })
 
 function toNumber(value: unknown): number | null {

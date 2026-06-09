@@ -93,7 +93,7 @@ def _random_dt_in(start: datetime, end: datetime) -> datetime:
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main() -> None:
-    print("Initializing DB schema …")
+    print("Initializing DB schema ...")
     init_db()
 
     db = SessionLocal()
@@ -102,7 +102,7 @@ def main() -> None:
         print(f"Existing users in DB: {existing}")
 
         # 1. Create fake users
-        print(f"\nCreating {NUM_USERS} fake users …")
+        print(f"\nCreating {NUM_USERS} fake users ...")
         fake_users: list[tuple[User, datetime]] = []
 
         for i in range(1, NUM_USERS + 1):
@@ -138,16 +138,16 @@ def main() -> None:
 
             if i % 50 == 0:
                 db.flush()
-                print(f"  … {i}/{NUM_USERS} users flushed")
+                print(f"  ... {i}/{NUM_USERS} users flushed")
 
         db.commit()
         for user, _ in fake_users:
             db.refresh(user)
 
-        print(f"  ✓ {len(fake_users)} users created")
+        print(f"  [OK] {len(fake_users)} users created")
 
         # 2. Generate subscription history (12 months, ascending)
-        print("\nGenerating subscription history …")
+        print("\nGenerating subscription history ...")
         now       = datetime.now(timezone.utc)
         total_subs = 0
 
@@ -197,11 +197,11 @@ def main() -> None:
             print(f"  {label}: {len(chosen):>3} subscriptions  (target={target})")
 
         db.commit()
-        print(f"\n✅ Done! {len(fake_users)} users · {total_subs} completed subscriptions")
+        print(f"\n[SUCCESS] Done! {len(fake_users)} users - {total_subs} completed subscriptions")
 
     except Exception as exc:
         db.rollback()
-        print(f"\n❌ Error: {exc}", file=sys.stderr)
+        print(f"\n[ERROR] Error: {exc}", file=sys.stderr)
         raise
     finally:
         db.close()

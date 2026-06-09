@@ -21,9 +21,20 @@ type QuoteCallback = (quote: RealtimeQuote) => void
 type ConnectionCallback = (status: 'connected' | 'disconnected' | 'error' | 'fallback') => void
 
 const _backendBase = (import.meta.env.VITE_BACKEND_URL || '').trim().replace(/\/+$/, '')
-const WS_URL = _backendBase
-  ? _backendBase.replace(/^http/, 'ws') + '/api/ws/dnse'
-  : `ws://${window.location.host}/api/ws/dnse`
+const WS_URL = (() => {
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1'
+  const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
+  if (_backendBase) {
+    let wsBase = _backendBase.replace(/^http/, 'ws')
+    if (wsBase.includes('localhost')) {
+      wsBase = wsBase.replace('localhost', hostname)
+    } else if (wsBase.includes('127.0.0.1')) {
+      wsBase = wsBase.replace('127.0.0.1', hostname)
+    }
+    return wsBase + '/api/ws/dnse'
+  }
+  return `${protocol}://${window.location.host}/api/ws/dnse`
+})()
 const RECONNECT_DELAY = 3000
 const MAX_RECONNECT_ATTEMPTS = 2
 const HEARTBEAT_INTERVAL = 30000

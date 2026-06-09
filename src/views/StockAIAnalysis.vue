@@ -1,95 +1,23 @@
 <template>
   <AdminLayout>
     <div class="space-y-6">
-      <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
-        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">VN30 Financial Analyzer</h1>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Phân tích cổ phiếu bằng AI với dữ liệu realtime từ backend_v2.
-            </p>
-          </div>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex flex-wrap items-center gap-3">
+          <h1 class="text-2xl font-bold text-gray-800 dark:text-white/90">VN30 Financial Analyzer</h1>
 
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="inline-flex items-center gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
-              <button
-                class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
-                :class="
-                  currentView === 'dashboard'
-                    ? 'bg-white text-gray-900 shadow-theme-xs dark:bg-gray-900 dark:text-white'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                "
-                @click="switchView('dashboard')"
-              >
-                Dashboard
-              </button>
-              <button
-                class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
-                :class="
-                  currentView === 'ai-analysis'
-                    ? 'bg-white text-gray-900 shadow-theme-xs dark:bg-gray-900 dark:text-white'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                "
-                @click="switchView('ai-analysis')"
-              >
-                Phân tích cổ phiếu bằng AI
-              </button>
-            </div>
+          <span class="inline-flex items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
+            {{ analysis.model }}
+          </span>
 
-            <span class="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-500/15 dark:text-brand-300">
-              {{ analysis.model }}
-            </span>
-
-            <span class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-              <span class="h-2 w-2 rounded-full" :class="statusDotClass"></span>
-              {{ statusLabel }}
-            </span>
-
-            <button
-              class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-              @click="toggleSettings"
-            >
-              Cấu hình
-            </button>
-          </div>
+          <span class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass"></span>
+            {{ statusLabel }}
+          </span>
         </div>
-
-        <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div class="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Nguồn dữ liệu</p>
-            <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">FastAPI backend_v2</p>
-          </div>
-          <div class="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Pipeline</p>
-            <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">Technical + News + Event + Fundamentals</p>
-          </div>
-          <div class="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Mã đang theo dõi</p>
-            <p class="mt-1 text-sm font-semibold text-gray-800 dark:text-white/90">{{ selectedSymbol }}</p>
-          </div>
-        </div>
-
-        <div
-          v-if="showSettings"
-          class="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-gray-700 dark:bg-gray-800/50"
-        >
-          <p class="font-semibold text-gray-800 dark:text-white/90">Cấu hình AI Analyzer</p>
-          <p class="mt-1 text-gray-500 dark:text-gray-400">
-            Trang này đã port cấu trúc từ AI-Financial-Analyzer và đồng bộ lại theo theme/layout hiện tại của dự án VN30.
-          </p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700 dark:bg-gray-900 dark:text-gray-300">Model: {{ analysis.model }}</span>
-            <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700 dark:bg-gray-900 dark:text-gray-300">Backend: {{ backendLabel }}</span>
-            <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-700 dark:bg-gray-900 dark:text-gray-300">Last update: {{ lastUpdatedLabel }}</span>
-          </div>
-        </div>
-      </section>
+      </div>
 
       <div class="grid grid-cols-12 gap-4 md:gap-6">
-        <section
-          class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
-          :class="currentView === 'dashboard' ? 'xl:col-span-8' : 'xl:col-span-7'"
-        >
+        <section class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
           <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Market View</h2>
             <div class="flex flex-wrap items-center gap-2">
@@ -119,7 +47,7 @@
             </div>
           </div>
 
-          <div ref="chartContainer" class="h-[420px] w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900"></div>
+          <div ref="chartContainer" class="h-[380px] w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900"></div>
 
           <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
             <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
@@ -145,10 +73,7 @@
           </div>
         </section>
 
-        <section
-          class="relative col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
-          :class="currentView === 'dashboard' ? 'xl:col-span-4' : 'xl:col-span-5'"
-        >
+        <section class="relative col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
           <!-- Premium lock overlay -->
           <div
             v-if="!isPremium()"
@@ -174,10 +99,10 @@
             </div>
           </div>
 
-          <div class="mb-4 flex items-center justify-between">
+          <div class="mb-4 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-800">
             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">AI Brain Explorer</h2>
             <button
-              class="rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+              class="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
               :disabled="isBusy || isAnalyzing"
               @click="generateAnalysis(true)"
             >
@@ -185,74 +110,82 @@
             </button>
           </div>
 
-          <div class="rounded-xl border px-4 py-5 text-center" :class="decisionBadgeClass">
-            <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision</p>
-            <p class="mt-2 text-4xl font-bold">{{ analysis.decision }}</p>
-          </div>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            <!-- Left Column: Decision & Confidence -->
+            <div class="flex flex-col gap-4 lg:col-span-3">
+              <div class="flex-1 flex flex-col justify-center rounded-xl border px-4 py-5 text-center" :class="decisionBadgeClass">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision</p>
+                <p class="mt-2 text-4xl font-bold">{{ analysis.decision }}</p>
+              </div>
 
-          <div class="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
-            <div class="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              <span>Confidence</span>
-              <span>{{ analysis.confidence }}%</span>
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+                <div class="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <span>Confidence</span>
+                  <span>{{ analysis.confidence }}%</span>
+                </div>
+                <div class="mt-2 h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                  <div class="h-full rounded-full bg-brand-500 transition-all" :style="{ width: `${analysis.confidence}%` }"></div>
+                </div>
+              </div>
             </div>
-            <div class="mt-2 h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-              <div class="h-full rounded-full bg-brand-500 transition-all" :style="{ width: `${analysis.confidence}%` }"></div>
-            </div>
-          </div>
 
-          <div class="mt-4 inline-flex w-full flex-wrap items-center gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
-            <button
-              v-for="tab in tabList"
-              :key="tab.key"
-              class="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
-              :class="
-                activeTab === tab.key
-                  ? 'bg-white text-gray-900 shadow-theme-xs dark:bg-gray-900 dark:text-white'
-                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-              "
-              @click="activeTab = tab.key"
-            >
-              {{ tab.label }}
-              <span v-if="hasTabContent(tab.key)" class="h-1.5 w-1.5 rounded-full bg-success-500"></span>
-            </button>
-          </div>
+            <!-- Center Column: Analysis Tabs -->
+            <div class="flex flex-col gap-3 lg:col-span-6">
+              <div class="inline-flex w-full flex-wrap items-center gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-800">
+                <button
+                  v-for="tab in tabList"
+                  :key="tab.key"
+                  class="flex-1 inline-flex justify-center items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+                  :class="
+                    activeTab === tab.key
+                      ? 'bg-white text-gray-900 shadow-theme-xs dark:bg-gray-900 dark:text-white'
+                      : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                  "
+                  @click="activeTab = tab.key"
+                >
+                  {{ tab.label }}
+                  <span v-if="hasTabContent(tab.key)" class="h-1.5 w-1.5 rounded-full bg-success-500"></span>
+                </button>
+              </div>
 
-          <div class="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
-            <div v-show="activeTab === 'full'">
-              <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Full Analysis</p>
-              <div class="max-h-52 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.full"></div>
+              <div class="flex-1 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+                <div v-show="activeTab === 'full'">
+                  <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Full Analysis</p>
+                  <div class="max-h-48 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.full"></div>
+                </div>
+                <div v-show="activeTab === 'technical'">
+                  <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Technical</p>
+                  <div class="max-h-48 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.technical"></div>
+                </div>
+                <div v-show="activeTab === 'fundamental'">
+                  <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Fundamental</p>
+                  <div class="max-h-48 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.fundamental"></div>
+                </div>
+                <div v-show="activeTab === 'sentiment'">
+                  <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Sentiment</p>
+                  <div class="max-h-48 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.sentiment"></div>
+                </div>
+                <div v-show="activeTab === 'conclusion'">
+                  <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Conclusion</p>
+                  <div class="max-h-48 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.conclusion"></div>
+                </div>
+              </div>
             </div>
-            <div v-show="activeTab === 'technical'">
-              <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Technical</p>
-              <div class="max-h-52 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.technical"></div>
-            </div>
-            <div v-show="activeTab === 'fundamental'">
-              <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Fundamental</p>
-              <div class="max-h-52 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.fundamental"></div>
-            </div>
-            <div v-show="activeTab === 'sentiment'">
-              <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Sentiment</p>
-              <div class="max-h-52 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.sentiment"></div>
-            </div>
-            <div v-show="activeTab === 'conclusion'">
-              <p class="mb-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Conclusion</p>
-              <div class="max-h-52 overflow-y-auto text-sm leading-6 text-gray-600 dark:text-gray-300" v-html="tabContent.conclusion"></div>
-            </div>
-          </div>
 
-          <div class="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
-            <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Key Factors</p>
-            <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-600 dark:text-gray-300">
-              <li v-for="factor in analysis.factors" :key="factor">{{ factor }}</li>
-              <li v-if="analysis.factors.length === 0" class="italic text-gray-500 dark:text-gray-400">No factors available yet.</li>
-            </ul>
+            <!-- Right Column: Key Factors -->
+            <div class="flex flex-col lg:col-span-3">
+              <div class="flex-1 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Key Factors</p>
+                <ul class="list-disc space-y-1.5 pl-5 text-sm text-gray-600 dark:text-gray-300">
+                  <li v-for="factor in analysis.factors" :key="factor">{{ factor }}</li>
+                  <li v-if="analysis.factors.length === 0" class="italic text-gray-500 dark:text-gray-400">No factors available yet.</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section
-          v-if="currentView === 'dashboard'"
-          class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
-        >
+        <section class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
           <div class="mb-4 flex items-center justify-between">
             <h2 class="text-lg font-semibold text-gray-800 dark:text-white/90">Backtest Tracker</h2>
             <button
@@ -264,65 +197,77 @@
             </button>
           </div>
 
-          <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Total Predictions</p>
-              <p class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">{{ totalPredictions }}</p>
+          <div class="grid grid-cols-1 gap-6 lg:grid-cols-12">
+            <!-- Left: Stacked 4 Metrics Cards -->
+            <div class="flex flex-col gap-3 lg:col-span-3">
+              <div class="flex-1 flex flex-col justify-center rounded-xl border border-gray-200 bg-gray-50 p-3.5 text-center dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Total Predictions</p>
+                <p class="mt-1 text-2xl font-bold text-gray-800 dark:text-white/90">{{ totalPredictions }}</p>
+              </div>
+              <div class="flex-1 flex flex-col justify-center rounded-xl border border-gray-200 bg-gray-50 p-3.5 text-center dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Win Rate</p>
+                <p class="mt-1 text-2xl font-bold text-gray-800 dark:text-white/90">{{ winRateDisplay }}</p>
+              </div>
+              <div class="flex-1 flex flex-col justify-center rounded-xl border border-gray-200 bg-gray-50 p-3.5 text-center dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Avg Confidence</p>
+                <p class="mt-1 text-2xl font-bold text-gray-800 dark:text-white/90">{{ avgConfidenceDisplay }}</p>
+              </div>
+              <div class="flex-1 flex flex-col justify-center rounded-xl border border-gray-200 bg-gray-50 p-3.5 text-center dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Accuracy</p>
+                <p class="mt-1 text-2xl font-bold text-gray-800 dark:text-white/90">{{ accuracyDisplay }}</p>
+              </div>
             </div>
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Win Rate</p>
-              <p class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">{{ winRateDisplay }}</p>
-            </div>
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Avg Confidence</p>
-              <p class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">{{ avgConfidenceDisplay }}</p>
-            </div>
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-center dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Accuracy</p>
-              <p class="mt-1 text-xl font-semibold text-gray-800 dark:text-white/90">{{ accuracyDisplay }}</p>
-            </div>
-          </div>
 
-          <div class="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
-            <p class="mb-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Signal Distribution</p>
-            <p v-if="signalDistribution.length === 0" class="text-sm italic text-gray-500 dark:text-gray-400">
-              Signal distribution will appear here...
-            </p>
-            <div v-else class="space-y-2">
-              <div v-for="row in signalDistribution" :key="row.label" class="grid grid-cols-[100px,1fr,40px] items-center gap-3">
-                <span class="text-xs font-medium text-gray-600 dark:text-gray-300">{{ row.label }}</span>
-                <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                  <div
-                    class="h-full rounded-full transition-all"
-                    :class="signalFillClass(row.className)"
-                    :style="{ width: `${row.percentage.toFixed(1)}%` }"
-                  ></div>
+            <!-- Right: Signal Distribution -->
+            <div class="flex flex-col rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60 lg:col-span-9 justify-between">
+              <div>
+                <p class="mb-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Signal Distribution</p>
+                <p v-if="signalDistribution.length === 0" class="text-sm italic text-gray-500 dark:text-gray-400">
+                  Signal distribution will appear here...
+                </p>
+                <div v-else class="space-y-2.5">
+                  <div v-for="row in signalDistribution" :key="row.label" class="grid grid-cols-[100px,1fr,40px] items-center gap-3">
+                    <span class="text-xs font-medium text-gray-600 dark:text-gray-300">{{ row.label }}</span>
+                    <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                      <div
+                        class="h-full rounded-full transition-all"
+                        :class="signalFillClass(row.className)"
+                        :style="{ width: `${row.percentage.toFixed(1)}%` }"
+                      ></div>
+                    </div>
+                    <span class="text-right text-xs font-medium text-gray-600 dark:text-gray-300">{{ row.percentage.toFixed(0) }}%</span>
+                  </div>
                 </div>
-                <span class="text-right text-xs font-medium text-gray-600 dark:text-gray-300">{{ row.percentage.toFixed(0) }}%</span>
               </div>
             </div>
           </div>
 
-          <div class="mt-4 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+          <div class="mt-6 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
             <table class="min-w-full text-sm">
               <thead class="bg-gray-50 dark:bg-gray-800/60">
                 <tr>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Date</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Model</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Confidence</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">5D Return</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">7D Return</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</th>
+                  <th
+                    v-for="col in columns"
+                    :key="col.key"
+                    class="cursor-pointer select-none px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 transition hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    @click="toggleSort(col.key)"
+                  >
+                    <div class="flex items-center gap-1">
+                      <span>{{ col.label }}</span>
+                      <span v-if="sortKey === col.key" class="text-[10px] text-brand-500">
+                        {{ sortOrder === 'asc' ? '▲' : '▼' }}
+                      </span>
+                    </div>
+                  </th>
                   <th class="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Detail</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="backtestRecords.length === 0">
+                <tr v-if="sortedBacktestRecords.length === 0">
                   <td colspan="8" class="px-3 py-6 text-center text-sm italic text-gray-500 dark:text-gray-400">No prediction history available</td>
                 </tr>
                 <tr
-                  v-for="record in backtestRecords"
+                  v-for="record in sortedBacktestRecords"
                   v-else
                   :key="record.analysisId || `${record.date}-${record.decision}-${record.confidence}`"
                   class="border-t border-gray-200 dark:border-gray-700"
@@ -360,7 +305,7 @@
       >
         <div class="rounded-xl border border-gray-200 bg-white px-6 py-5 text-center shadow-theme-xl dark:border-gray-700 dark:bg-gray-800">
           <div class="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-brand-100 border-t-brand-500 dark:border-brand-900/30 dark:border-t-brand-400"></div>
-          <p class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">{{ loadingMessage }}</p>
+          <p class="mt-3 text-sm font-medium text-gray-700 dark:text-200">{{ loadingMessage }}</p>
         </div>
       </div>
 
@@ -369,16 +314,16 @@
         class="fixed inset-0 z-[9998] flex items-center justify-center bg-gray-900/40 px-4 py-6 backdrop-blur-[2px] dark:bg-gray-950/60"
         @click.self="closeBacktestDetail"
       >
-        <div class="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-700 dark:bg-gray-900">
-          <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+        <div class="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-700 dark:bg-gray-900">
+          <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5 dark:border-gray-800">
             <div>
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">AI Prediction Detail</p>
-              <h3 class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+              <p class="text-xs uppercase tracking-wide font-semibold text-brand-500">AI Prediction Detail</p>
+              <h3 class="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
                 {{ selectedBacktestRecord.symbol || selectedSymbol }} · {{ formatDateShort(selectedBacktestRecord.date) }}
               </h3>
             </div>
             <button
-              class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              class="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
               type="button"
               @click="closeBacktestDetail"
             >
@@ -386,46 +331,76 @@
             </button>
           </div>
 
-          <div class="space-y-4 p-5">
-            <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
-                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision</p>
-                <p class="mt-2">
-                  <span class="inline-flex rounded-md px-2 py-1 text-sm font-semibold" :class="decisionTagClass(selectedBacktestRecord.decision)">
-                    {{ selectedBacktestRecord.decision }}
-                  </span>
-                </p>
+          <div class="grid grid-cols-1 gap-6 p-6 lg:grid-cols-12 items-stretch">
+            <!-- Left Column: Explanation & Detailed Analysis -->
+            <div class="space-y-5 lg:col-span-8 flex flex-col h-full">
+              <!-- AI Explanation -->
+              <div class="rounded-xl border border-brand-100 bg-brand-50/10 p-5 dark:border-brand-500/10 dark:bg-brand-500/5">
+                <h4 class="text-base font-bold text-gray-800 dark:text-white/90 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  Lời giải thích chi tiết
+                </h4>
+                <p class="mt-3 text-[15px] leading-7 text-gray-700 dark:text-gray-200 whitespace-pre-wrap">{{ selectedBacktestRecord.reasoning || 'Chưa có lời giải thích được lưu.' }}</p>
               </div>
-              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
-                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Confidence</p>
-                <p class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">{{ selectedBacktestRecord.confidence }}%</p>
-              </div>
-              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
-                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">5D Return</p>
-                <p class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">{{ formatBacktestPercent(selectedBacktestRecord.return5d) }}</p>
-              </div>
-              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
-                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">7D Return</p>
-                <p class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">{{ formatBacktestPercent(selectedBacktestRecord.return7d) }}</p>
+
+              <!-- Raw Detailed Output -->
+              <div class="flex-1 flex flex-col rounded-xl border border-gray-200 bg-gray-50 p-5 dark:border-gray-700 dark:bg-gray-800/60">
+                <h4 class="text-base font-bold text-gray-800 dark:text-white/90 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Chi tiết phân tích thô từ Model
+                </h4>
+                <div class="flex-1 mt-3 max-h-[420px] overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+                  <pre class="whitespace-pre-wrap text-[13px] font-mono leading-6 text-gray-700 dark:text-gray-300 h-full">{{ selectedBacktestRecord.rawOutput || selectedBacktestRecord.reasoning || 'Chưa có nội dung phân tích chi tiết.' }}</pre>
+                </div>
               </div>
             </div>
 
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Lời giải thích</p>
-              <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-700 dark:text-gray-300">{{ selectedBacktestRecord.reasoning || 'Chưa có lời giải thích được lưu.' }}</p>
-            </div>
+            <!-- Right Column: Visual Prediction Stats & Key Factors -->
+            <div class="space-y-5 lg:col-span-4 flex flex-col h-full">
+              <!-- Performance Stats Grid -->
+              <div class="grid grid-cols-2 gap-3">
+                <div class="rounded-xl border px-3 py-5 text-center flex flex-col justify-center min-h-[100px]" :class="getDecisionBadgeClass(selectedBacktestRecord.decision)">
+                  <p class="text-xs font-semibold uppercase tracking-widest">Decision</p>
+                  <p class="mt-2 text-3xl font-black">{{ selectedBacktestRecord.decision }}</p>
+                </div>
+                <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-5 text-center dark:border-gray-700 dark:bg-gray-800/60 flex flex-col justify-center min-h-[100px]">
+                  <p class="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">Confidence</p>
+                  <p class="mt-2 text-3xl font-black text-gray-800 dark:text-white/90">{{ selectedBacktestRecord.confidence }}%</p>
+                </div>
+                <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-5 text-center dark:border-gray-700 dark:bg-gray-800/60 flex flex-col justify-center min-h-[100px]">
+                  <p class="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">5D Return</p>
+                  <p class="mt-2 text-3xl font-black" :class="selectedBacktestRecord.return5d !== null && selectedBacktestRecord.return5d >= 0 ? 'text-success-600 dark:text-success-400' : 'text-error-600 dark:text-error-400'">
+                    {{ formatBacktestPercent(selectedBacktestRecord.return5d) }}
+                  </p>
+                </div>
+                <div class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-5 text-center dark:border-gray-700 dark:bg-gray-800/60 flex flex-col justify-center min-h-[100px]">
+                  <p class="text-xs font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">7D Return</p>
+                  <p class="mt-2 text-3xl font-black" :class="selectedBacktestRecord.return7d !== null && selectedBacktestRecord.return7d >= 0 ? 'text-success-600 dark:text-success-400' : 'text-error-600 dark:text-error-400'">
+                    {{ formatBacktestPercent(selectedBacktestRecord.return7d) }}
+                  </p>
+                </div>
+              </div>
 
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Yếu tố chính</p>
-              <ul v-if="selectedBacktestRecord.keyFactors.length > 0" class="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700 dark:text-gray-300">
-                <li v-for="factor in selectedBacktestRecord.keyFactors" :key="factor">{{ factor }}</li>
-              </ul>
-              <p v-else class="mt-2 text-sm italic text-gray-500 dark:text-gray-400">Chưa có yếu tố chính được lưu.</p>
-            </div>
-
-            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
-              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Chi tiết phân tích</p>
-              <pre class="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-gray-700 dark:text-gray-300">{{ selectedBacktestRecord.rawOutput || selectedBacktestRecord.reasoning || 'Chưa có nội dung phân tích chi tiết.' }}</pre>
+              <!-- Key Factors list -->
+              <div class="flex-1 rounded-xl border border-gray-200 bg-gray-50 p-5 dark:border-gray-700 dark:bg-gray-800/60 flex flex-col justify-start">
+                <h4 class="text-base font-bold text-gray-800 dark:text-white/90 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  Yếu tố chính
+                </h4>
+                <ul v-if="selectedBacktestRecord.keyFactors.length > 0" class="mt-3 space-y-2.5">
+                  <li v-for="factor in selectedBacktestRecord.keyFactors" :key="factor" class="flex items-start gap-2 text-base font-medium text-gray-700 dark:text-gray-200">
+                    <span class="mt-2 h-2 w-2 shrink-0 rounded-full bg-brand-500"></span>
+                    <span>{{ factor }}</span>
+                  </li>
+                </ul>
+                <p v-else class="mt-3 text-[15px] italic text-gray-500 dark:text-gray-400">Chưa có yếu tố chính được lưu.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -479,7 +454,6 @@ import {
   type Decision,
 } from '@/constants/stockAiAnalysis'
 
-type ViewMode = 'dashboard' | 'ai-analysis'
 type AnalysisTab = 'full' | 'technical' | 'fundamental' | 'sentiment' | 'conclusion'
 type AppStatus = 'connected' | 'disconnected' | 'analyzing'
 type AlertType = 'success' | 'error' | 'info'
@@ -538,11 +512,9 @@ function normalizeBackendUrl(rawUrl?: string): string {
 
 const BACKEND_FALLBACK = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 
-const currentView = ref<ViewMode>('dashboard')
 const activeTab = ref<AnalysisTab>('full')
 const selectedSymbol = ref(symbolOptions.includes('FPT') ? 'FPT' : symbolOptions[0] || 'VN30')
 const status = ref<AppStatus>('connected')
-const showSettings = ref(false)
 const isBusy = ref(false)
 const isAnalyzing = ref(false)
 const isDarkTheme = ref(document.documentElement.classList.contains('dark'))
@@ -556,6 +528,65 @@ const eventItems = ref<MarketEventItem[]>([])
 const overview = ref<Record<string, unknown> | null>(null)
 const backtestRecords = ref<BacktestRecord[]>([])
 const selectedBacktestRecord = ref<BacktestRecord | null>(null)
+
+const sortKey = ref<string>('date')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+
+const columns = [
+  { key: 'date', label: 'Date' },
+  { key: 'model', label: 'Model' },
+  { key: 'decision', label: 'Decision' },
+  { key: 'confidence', label: 'Confidence' },
+  { key: 'return5d', label: '5D Return' },
+  { key: 'return7d', label: '7D Return' },
+  { key: 'accurate', label: 'Status' }
+]
+
+function toggleSort(key: string): void {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = key
+    sortOrder.value = 'desc'
+  }
+}
+
+const sortedBacktestRecords = computed(() => {
+  const key = sortKey.value
+  const order = sortOrder.value
+  const multiplier = order === 'asc' ? 1 : -1
+
+  return [...backtestRecords.value].sort((a, b) => {
+    let valA = a[key as keyof BacktestRecord]
+    let valB = b[key as keyof BacktestRecord]
+
+    // Special handling for returns where null might occur
+    if (key === 'return5d' || key === 'return7d') {
+      if (valA === null && valB === null) return 0
+      if (valA === null) return 1
+      if (valB === null) return -1
+    }
+
+    if (valA === null && valB === null) return 0
+    if (valA === null) return 1
+    if (valB === null) return -1
+
+    if (typeof valA === 'string' && typeof valB === 'string') {
+      return valA.localeCompare(valB) * multiplier
+    }
+
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      return (valA - valB) * multiplier
+    }
+
+    if (typeof valA === 'boolean' && typeof valB === 'boolean') {
+      return (valA === valB ? 0 : valA ? 1 : -1) * multiplier
+    }
+
+    return 0
+  })
+})
+
 
 const analysis = ref<GeneratedAnalysis>(createEmptyAnalysis())
 
@@ -685,8 +716,8 @@ const statusLabel = computed(() => {
   return 'Offline'
 })
 
-const decisionBadgeClass = computed(() => {
-  switch (analysis.value.decision) {
+function getDecisionBadgeClass(decision: Decision): string {
+  switch (decision) {
     case 'Strong Buy':
     case 'Buy':
       return 'border-success-200 bg-success-50 text-success-700 dark:border-success-700 dark:bg-success-500/15 dark:text-success-300'
@@ -698,10 +729,11 @@ const decisionBadgeClass = computed(() => {
     default:
       return 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
   }
-})
+}
 
-const backendLabel = computed(() => BACKEND_FALLBACK)
-const lastUpdatedLabel = computed(() => formatDateTime(analysis.value.updatedAt))
+const decisionBadgeClass = computed(() => getDecisionBadgeClass(analysis.value.decision))
+
+
 
 const totalPredictions = computed(() => backtestRecords.value.length)
 
@@ -1555,13 +1587,7 @@ function hasTabContent(tab: AnalysisTab): boolean {
   return analysis.value[key].trim().length > 0
 }
 
-function switchView(view: ViewMode): void {
-  currentView.value = view
-}
 
-function toggleSettings(): void {
-  showSettings.value = !showSettings.value
-}
 
 function showAlert(message: string, type: AlertType = 'info'): void {
   alertMessage.value = message

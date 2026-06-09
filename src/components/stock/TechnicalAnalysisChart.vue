@@ -66,9 +66,14 @@
     </div>
 
     <!-- Charts -->
-    <div v-else class="space-y-4">
+    <div v-else class="space-y-6">
       <!-- Main Price Chart with Bollinger Bands + SMA -->
-      <div class="max-w-full overflow-x-auto custom-scrollbar">
+      <div class="rounded-xl border border-gray-100 bg-gray-50/20 p-4 dark:border-gray-800/60 dark:bg-gray-900/10 max-w-full overflow-x-auto custom-scrollbar">
+        <div class="mb-3 flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            Biểu đồ giá & các đường trung bình (SMA / Bollinger Bands)
+          </span>
+        </div>
         <div class="min-w-[700px] xl:min-w-full pl-3 pr-2">
           <VueApexCharts
             type="line"
@@ -80,7 +85,12 @@
       </div>
 
       <!-- RSI Chart -->
-      <div class="max-w-full overflow-x-auto custom-scrollbar">
+      <div class="rounded-xl border border-gray-100 bg-gray-50/20 p-4 dark:border-gray-800/60 dark:bg-gray-900/10 max-w-full overflow-x-auto custom-scrollbar">
+        <div class="mb-3 flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            Chỉ báo sức mạnh tương đối (RSI 14)
+          </span>
+        </div>
         <div class="min-w-[700px] xl:min-w-full pl-3 pr-2">
           <VueApexCharts
             type="line"
@@ -92,7 +102,12 @@
       </div>
 
       <!-- MACD Chart -->
-      <div class="max-w-full overflow-x-auto custom-scrollbar">
+      <div class="rounded-xl border border-gray-100 bg-gray-50/20 p-4 dark:border-gray-800/60 dark:bg-gray-900/10 max-w-full overflow-x-auto custom-scrollbar">
+        <div class="mb-3 flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            Chỉ báo xu hướng (MACD)
+          </span>
+        </div>
         <div class="min-w-[700px] xl:min-w-full pl-3 pr-2">
           <VueApexCharts
             type="line"

@@ -20,10 +20,29 @@ const RETRY_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
 
 export function normalizeBackendUrl(rawUrl?: string): string {
   const value = (rawUrl || '').trim()
-  if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
-  if (value.startsWith(':')) return `http://127.0.0.1${value}`
-  return `http://${value}`.replace(/\/+$/, '')
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1'
+  if (!value) {
+    return `http://${hostname}:8000`
+  }
+  if (/^https?:\/\//i.test(value)) {
+    let url = value.replace(/\/+$/, '')
+    if (url.includes('localhost')) {
+      url = url.replace('localhost', hostname)
+    } else if (url.includes('127.0.0.1')) {
+      url = url.replace('127.0.0.1', hostname)
+    }
+    return url
+  }
+  if (value.startsWith(':')) {
+    return `http://${hostname}${value}`
+  }
+  let url = `http://${value}`.replace(/\/+$/, '')
+  if (url.includes('localhost')) {
+    url = url.replace('localhost', hostname)
+  } else if (url.includes('127.0.0.1')) {
+    url = url.replace('127.0.0.1', hostname)
+  }
+  return url
 }
 
 function isRetryableMethod(method?: string): boolean {

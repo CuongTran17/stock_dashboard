@@ -157,56 +157,86 @@
           </p>
         </section>
 
-        <section
-          class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
-        >
-          <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Top Movers</h2>
-
-          <div class="space-y-4">
-            <div>
-              <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-success-600">Top Gainers</p>
-              <ul class="space-y-2">
-                <li
-                  v-for="stock in topGainers"
-                  :key="`g-${stock.symbol}`"
-                  class="flex items-center justify-between rounded-lg bg-success-50 px-3 py-2 dark:bg-success-500/10"
-                >
-                  <button class="font-medium text-gray-800 dark:text-white/90" @click="goToStock(stock.symbol)">
-                    {{ stock.symbol }}
-                  </button>
-                  <span class="text-sm font-medium text-success-600">
-                    +{{ stock.changePercent.toFixed(2) }}%
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-error-600">Top Losers</p>
-              <ul class="space-y-2">
-                <li
-                  v-for="stock in topLosers"
-                  :key="`l-${stock.symbol}`"
-                  class="flex items-center justify-between rounded-lg bg-error-50 px-3 py-2 dark:bg-error-500/10"
-                >
-                  <button class="font-medium text-gray-800 dark:text-white/90" @click="goToStock(stock.symbol)">
-                    {{ stock.symbol }}
-                  </button>
-                  <span class="text-sm font-medium text-error-600">
-                    {{ stock.changePercent.toFixed(2) }}%
-                  </span>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          <p
-            v-if="stocksLoading && topGainers.length === 0 && topLosers.length === 0"
-            class="mt-3 text-sm text-gray-500 dark:text-gray-400"
+        <!-- Cột phải: Top Gainers & Top Losers tách biệt -->
+        <div class="col-span-12 xl:col-span-4 flex flex-col gap-4 md:gap-6">
+          <!-- Thẻ Top Gainers -->
+          <section
+            class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] flex-1 flex flex-col"
           >
-            Đang tải top movers thực tế...
-          </p>
-        </section>
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Top Tăng Giá (Gainers)</h2>
+            <ul class="space-y-2 flex-1 flex flex-col">
+              <li
+                v-for="(stock, index) in topGainers"
+                :key="`g-${stock.symbol}`"
+                class="flex flex-1 items-center justify-between rounded-lg px-3 py-2 transition-all"
+                :class="[
+                  index === 0
+                    ? 'bg-success-500 text-white shadow-sm dark:bg-success-600'
+                    : 'bg-success-50 dark:bg-success-500/10'
+                ]"
+              >
+                <button
+                  class="font-semibold transition-colors"
+                  :class="index === 0 ? 'text-white hover:text-white/80' : 'text-gray-800 dark:text-white/90 hover:text-brand-500'"
+                  @click="goToStock(stock.symbol)"
+                >
+                  {{ stock.symbol }}
+                </button>
+                <span
+                  class="text-sm font-bold"
+                  :class="index === 0 ? 'text-white' : 'text-success-600 dark:text-success-400'"
+                >
+                  +{{ stock.changePercent.toFixed(2) }}%
+                </span>
+              </li>
+            </ul>
+            <p
+              v-if="stocksLoading && topGainers.length === 0"
+              class="mt-3 text-sm text-gray-500 dark:text-gray-400"
+            >
+              Đang tải top movers...
+            </p>
+          </section>
+
+          <!-- Thẻ Top Losers -->
+          <section
+            class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] flex-1 flex flex-col"
+          >
+            <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Top Giảm Giá (Losers)</h2>
+            <ul class="space-y-2 flex-1 flex flex-col">
+              <li
+                v-for="(stock, index) in topLosers"
+                :key="`l-${stock.symbol}`"
+                class="flex flex-1 items-center justify-between rounded-lg px-3 py-2 transition-all"
+                :class="[
+                  index === 0
+                    ? 'bg-error-500 text-white shadow-sm dark:bg-error-600'
+                    : 'bg-error-50 dark:bg-error-500/10'
+                ]"
+              >
+                <button
+                  class="font-semibold transition-colors"
+                  :class="index === 0 ? 'text-white hover:text-white/80' : 'text-gray-800 dark:text-white/90 hover:text-brand-500'"
+                  @click="goToStock(stock.symbol)"
+                >
+                  {{ stock.symbol }}
+                </button>
+                <span
+                  class="text-sm font-bold"
+                  :class="index === 0 ? 'text-white' : 'text-error-600 dark:text-error-400'"
+                >
+                  {{ stock.changePercent.toFixed(2) }}%
+                </span>
+              </li>
+            </ul>
+            <p
+              v-if="stocksLoading && topLosers.length === 0"
+              class="mt-3 text-sm text-gray-500 dark:text-gray-400"
+            >
+              Đang tải top movers...
+            </p>
+          </section>
+        </div>
       </div>
 
       <section class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
