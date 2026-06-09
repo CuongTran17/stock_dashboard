@@ -41,7 +41,7 @@
               </div>
             </td>
             <td class="py-3 text-right font-medium text-gray-800 dark:text-white/90">
-              {{ formatPrice(stock.price) }}
+              {{ formatStockPrice(stock) }}
             </td>
             <td
               class="py-3 text-right font-medium"
@@ -94,6 +94,14 @@ function formatPrice(price: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(price)
+}
+
+function hasUsableSnapshotPrice(stock: StockState): boolean {
+  return stock.price > 0 && stock.dataStatus !== 'NO_DATA_IN_SNAPSHOT'
+}
+
+function formatStockPrice(stock: StockState): string {
+  return hasUsableSnapshotPrice(stock) ? formatPrice(stock.price) : '--'
 }
 
 function formatVolume(volume: number): string {

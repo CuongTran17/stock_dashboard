@@ -20,6 +20,7 @@ from vnstock import Vnstock
 
 from etl.config import EtlConfig
 from etl.logging_setup import get_logger
+from etl.providers.vnstock_provider import fetch_ratio_summary
 from etl.retry import _acquire_rate_slot, with_retry
 
 log = get_logger(__name__)
@@ -57,6 +58,8 @@ def extract_overview(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 
 # --- ratio summary ---------------------------------------------------------
 def _fetch_ratio_summary(symbol: str) -> pd.DataFrame:
+    records = fetch_ratio_summary(symbol)
+    return pd.DataFrame(records)
     """Lấy chỉ số tài chính. Thử Finance.ratio() (VCI/MSN), fallback về company.ratio_summary()."""
     # Phương án 1: Finance.ratio() — VCI, MSN (vnstock 3.5.1)
     for source in ("VCI", "MSN"):

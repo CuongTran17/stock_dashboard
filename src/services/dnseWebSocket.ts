@@ -35,7 +35,7 @@ function debugWs(message: string): void {
   }
 }
 
-class DnseWebSocketService {
+export class DnseWebSocketService {
   private ws: WebSocket | null = null
   private subscribers: Map<string, Set<QuoteCallback>> = new Map()
   private connectionCallbacks: Set<ConnectionCallback> = new Set()
@@ -113,6 +113,7 @@ class DnseWebSocketService {
     this.stopHeartbeat()
     this.reconnectAttempts = MAX_RECONNECT_ATTEMPTS // Prevent reconnect
     this.isConnecting = false
+    this.fallbackMode = false
 
     if (this.ws) {
       this.ws.onclose = null // Prevent reconnect trigger
@@ -120,8 +121,19 @@ class DnseWebSocketService {
       this.ws = null
     }
 
+  }
+
+  retryConnection(): void {
+    this.fallbackMode = false
+    this.reconnectAttempts = 0
+    this.connect()
+  }
+
+  destroy(): void {
+    this.disconnect()
     this.subscribers.clear()
     this.subscribedSymbols.clear()
+    this.connectionCallbacks.clear()
   }
 
   /**
@@ -176,6 +188,13 @@ class DnseWebSocketService {
    */
   get isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  get connectionState(): 'connected' | 'connecting' | 'fallback' | 'disconnected' {
+    if (this.isConnected) return 'connected'
+    if (this.isConnecting) return 'connecting'
+    if (this.fallbackMode) return 'fallback'
+    return 'disconnected'
   }
 
   // --- Private methods ---

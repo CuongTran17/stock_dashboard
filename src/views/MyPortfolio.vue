@@ -259,6 +259,8 @@
 import { computed, onMounted, ref } from 'vue'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { stockBackendApi } from '@/services/stockBackendApi'
+import { usePriceSubscription } from '@/composables/usePriceSubscription'
+import { stockPriceStore } from '@/stores/stockPriceStore'
 import {
   getMyPortfolio,
   addToPortfolio,
@@ -283,7 +285,8 @@ const showSymbolSuggestions = ref(false)
 const editTpPrice = ref<Record<number, number | undefined>>({})
 const editSlPrice = ref<Record<number, number | undefined>>({})
 const rowSaving = ref<Record<number, boolean>>({})
-const currentPrices = ref<Record<string, number>>({})
+const { stocksBySymbol } = stockPriceStore
+usePriceSubscription('my-portfolio', () => items.value.map((item) => item.symbol))
 
 const MIN_PRICE_THOUSAND = 1
 const MAX_PRICE_THOUSAND = 1000
@@ -298,7 +301,7 @@ const totalPnl = computed(() =>
     const avgPrice = item.avg_price || 0
     if (avgPrice <= 0) return sum
 
-    const currentPriceRaw = currentPrices.value[item.symbol] ?? avgPrice
+    const currentPriceRaw = stocksBySymbol[item.symbol]?.price ?? avgPrice
     const currentPrice = toThousandPrice(currentPriceRaw)
     return sum + (currentPrice - avgPrice) * item.quantity * 1000
   }, 0),
@@ -334,28 +337,6 @@ function isValidThousandPrice(value?: number): boolean {
   return Number.isFinite(value) && value >= MIN_PRICE_THOUSAND && value <= MAX_PRICE_THOUSAND
 }
 
-async function loadCurrentPrices(symbols: string[]) {
-  const normalizedSymbols = symbols
-    .map((symbol) => symbol.trim().toUpperCase())
-    .filter((symbol) => symbol.length > 0)
-
-  if (normalizedSymbols.length === 0) {
-    currentPrices.value = {}
-    return
-  }
-
-  try {
-    const data = await stockBackendApi.getSnapshots(normalizedSymbols)
-    const nextMap: Record<string, number> = {}
-    for (const snapshot of data.data || []) {
-      nextMap[snapshot.symbol.toUpperCase()] = Number(snapshot.price) || 0
-    }
-    currentPrices.value = nextMap
-  } catch (error) {
-    console.error('Failed to load current prices for portfolio:', error)
-  }
-}
-
 async function loadPortfolio() {
   loading.value = true
   try {
@@ -369,7 +350,6 @@ async function loadPortfolio() {
     }
     editTpPrice.value = tpMap
     editSlPrice.value = slMap
-    await loadCurrentPrices(data.items.map((item) => item.symbol))
   } catch (e) {
     console.error('Failed to load portfolio:', e)
   } finally {

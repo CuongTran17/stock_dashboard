@@ -221,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import PortfolioChart from '@/components/stock/PortfolioChart.vue'
@@ -230,12 +230,15 @@ import MarketOverview from '@/components/stock/MarketOverview.vue'
 import ConnectionStatus from '@/components/stock/ConnectionStatus.vue'
 import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vue'
 import { useStockData, VN30_TICKERS } from '@/composables/useStockData'
+import { usePriceSubscription } from '@/composables/usePriceSubscription'
 import { stockBackendApi, type MarketIndexQuote, type StockSnapshot } from '@/services/stockBackendApi'
 
 const router = useRouter()
 
 const {
   stocks,
+  watchlist,
+  featuredSymbols,
   watchlistStocks,
   isConnected,
   isLoading,
@@ -244,13 +247,12 @@ const {
   lastDataSyncAt,
   backendAvailable,
   fetchInitialData,
-  connectRealtime,
-  startPolling,
   addToWatchlist,
   removeFromWatchlist,
   getTechnicalAnalysis,
-  cleanup,
 } = useStockData()
+
+usePriceSubscription('stock-dashboard', () => [...featuredSymbols.value, ...watchlist.value])
 
 const selectedSymbol = ref('FPT')
 
@@ -262,16 +264,20 @@ const snapshotsLoading = ref(false)
 const activeTab = ref<FilterTab>('gainers')
 const dashboardDataError = ref<string | null>(null)
 
+function hasUsableSnapshotPrice(item: { price?: number; dataStatus?: string } | null | undefined): boolean {
+  return Boolean(item && Number(item.price) > 0 && item.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
+}
+
 const topGainers = computed(() =>
   [...snapshots.value]
-    .filter((s) => s.price > 0 && s.changePercent >= 0)
+    .filter((s) => hasUsableSnapshotPrice(s) && s.changePercent >= 0)
     .sort((a, b) => b.changePercent - a.changePercent)
     .slice(0, 12),
 )
 
 const topLosers = computed(() =>
   [...snapshots.value]
-    .filter((s) => s.price > 0 && s.changePercent < 0)
+    .filter((s) => hasUsableSnapshotPrice(s) && s.changePercent < 0)
     .sort((a, b) => a.changePercent - b.changePercent)
     .slice(0, 12),
 )
@@ -371,7 +377,7 @@ function formatIndex(value: number): string {
 }
 
 const allStocksArray = computed(() => {
-  return Object.values(stocks).filter((s) => s.price > 0)
+  return Object.values(stocks).filter((s) => hasUsableSnapshotPrice(s))
 })
 
 const formattedLastDataSync = computed(() => {
@@ -399,15 +405,7 @@ onMounted(async () => {
   await refreshDashboard()
 
   // 2. Kết nối WebSocket cho real-time
-  try {
-    connectRealtime()
-  } catch {
     // Fallback: polling mỗi 5 giây
-    startPolling(5000)
-  }
 })
 
-onUnmounted(() => {
-  cleanup()
-})
 </script>

@@ -58,7 +58,7 @@
         <!-- Price + Change -->
         <div class="text-right">
           <p class="font-semibold text-sm text-gray-800 dark:text-white/90">
-            {{ formatPrice(stock.price) }}
+            {{ formatStockPrice(stock) }}
           </p>
           <span
             :class="[
@@ -153,5 +153,13 @@ function formatPrice(price: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(price)
+}
+
+function hasUsableSnapshotPrice(stock: StockState): boolean {
+  return stock.price > 0 && stock.dataStatus !== 'NO_DATA_IN_SNAPSHOT'
+}
+
+function formatStockPrice(stock: StockState): string {
+  return hasUsableSnapshotPrice(stock) ? formatPrice(stock.price) : '--'
 }
 </script>

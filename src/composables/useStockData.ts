@@ -2,21 +2,21 @@
  * useStockData composable
  * =======================
  * Data strategy:
- * 1) FastAPI backend (vnstock)
- * 2) DNSE API / WebSocket
- * 3) Persistent backend cache fallback
+ * 1) FastAPI backend snapshots, refreshed from DNSE OpenAPI during market session
+ * 2) Backend WebSocket /api/ws/dnse, backed by the same DNSE-fed snapshot cache
+ * 3) Direct browser DNSE fallback only when backend is unavailable
  */
 
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { dnseApi, type StockQuote, type OHLCVData } from '@/services/dnseApi'
-import { dnseWebSocket, type RealtimeQuote } from '@/services/dnseWebSocket'
 import {
+  isBackendAvailableHealth,
   stockBackendApi,
   type CompanyOverview,
-  type SaveQuotePayload,
   type StockSnapshot,
   type TechnicalResponse,
 } from '@/services/stockBackendApi'
+import { stockPriceStore } from '@/stores/stockPriceStore'
 
 export const VN30_TICKERS = [
   'ACB', 'BCM', 'BID', 'BVH', 'CTG',
@@ -30,12 +30,6 @@ export const VN30_TICKERS = [
 export const DEFAULT_WATCHLIST = ['FPT', 'VNM', 'VCB', 'HPG', 'MBB', 'TCB', 'VIC', 'MSN']
 export const FEATURED_STOCKS = ['FPT', 'VNM', 'VCB', 'HPG']
 
-const ENABLE_REALTIME = import.meta.env.VITE_ENABLE_REALTIME === 'true'
-const DEFAULT_POLLING_MS = 5000
-const pollingMsFromEnv = Number(import.meta.env.VITE_BACKEND_POLLING_MS || DEFAULT_POLLING_MS)
-const BACKEND_POLLING_MS = Number.isFinite(pollingMsFromEnv) && pollingMsFromEnv >= 5000
-  ? pollingMsFromEnv
-  : DEFAULT_POLLING_MS
 const WATCHLIST_STORAGE_KEY = 'stockai_watchlist'
 
 export interface StockState {
@@ -51,6 +45,8 @@ export interface StockState {
   refPrice: number
   lastUpdate: string
   syncedAt: string | null
+  priceSource: string
+  dataStatus: string
   logoColor: string
 }
 
@@ -130,6 +126,8 @@ function createEmptyState(symbol: string, companyName: string = symbol): StockSt
     refPrice: 0,
     lastUpdate: new Date().toISOString(),
     syncedAt: null,
+    priceSource: 'no_data',
+    dataStatus: 'NO_DATA_IN_SNAPSHOT',
     logoColor: getSymbolColor(symbol),
   }
 }
@@ -149,8 +147,14 @@ function snapshotToState(snapshot: StockSnapshot): StockState {
     refPrice: toNumber(snapshot.refPrice),
     lastUpdate: snapshot.lastUpdate || new Date().toISOString(),
     syncedAt: snapshot.syncedAt || null,
+    priceSource: snapshot.priceSource || 'no_data',
+    dataStatus: snapshot.dataStatus || (toNumber(snapshot.price) > 0 ? 'DATA_AVAILABLE' : 'NO_DATA_IN_SNAPSHOT'),
     logoColor: getSymbolColor(symbol),
   }
+}
+
+function hasUsableSnapshotPrice(snapshot: StockSnapshot): boolean {
+  return toNumber(snapshot.price) > 0 && snapshot.dataStatus !== 'NO_DATA_IN_SNAPSHOT'
 }
 
 function normalizeSymbols(symbols: string[]): string[] {
@@ -175,21 +179,14 @@ function loadSavedWatchlist(): string[] {
 }
 
 function createStockDataStore() {
-  const stocks = reactive<Record<string, StockState>>({})
+  const stocks = stockPriceStore.stocksBySymbol as Record<string, StockState>
   const watchlist = ref<string[]>(loadSavedWatchlist())
   const featuredSymbols = ref<string[]>([...FEATURED_STOCKS])
-  const isConnected = ref(false)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   const lastRefresh = ref<Date>(new Date())
   const lastDataSyncAt = ref<string | null>(null)
   const backendAvailable = ref(false)
-
-  let unsubscribeWs: (() => void) | null = null
-  let unsubscribeConnection: (() => void) | null = null
-  let pollingTimer: ReturnType<typeof setInterval> | null = null
-  let saveQuotesBuffer: SaveQuotePayload[] = []
-  let saveQuotesTimer: ReturnType<typeof setInterval> | null = null
 
   const featuredStocks = computed(() =>
     featuredSymbols.value.map((symbol) => stocks[symbol]).filter(Boolean),
@@ -204,14 +201,8 @@ function createStockDataStore() {
   )
 
   const hasUsableData = computed(() =>
-    Object.values(stocks).some((stock) => stock.price > 0),
+    Object.values(stocks).some((stock) => stock.price > 0 && stock.dataStatus !== 'NO_DATA_IN_SNAPSHOT'),
   )
-
-  const connectionMode = computed<'realtime' | 'polling' | 'offline'>(() => {
-    if (isConnected.value) return 'realtime'
-    if (backendAvailable.value) return 'polling'
-    return 'offline'
-  })
 
   watch(watchlist, (symbols) => {
     try {
@@ -224,7 +215,7 @@ function createStockDataStore() {
   async function checkBackendAvailability(): Promise<boolean> {
     try {
       const health = await stockBackendApi.checkHealth()
-      backendAvailable.value = health.status === 'ok'
+      backendAvailable.value = isBackendAvailableHealth(health)
     } catch {
       backendAvailable.value = false
     }
@@ -254,7 +245,7 @@ function createStockDataStore() {
     try {
       const response = await stockBackendApi.getSnapshots([upperSymbol])
       const snapshot = response.data.find((item) => item.symbol.toUpperCase() === upperSymbol)
-      if (snapshot) {
+      if (snapshot && hasUsableSnapshotPrice(snapshot)) {
         return snapshotToState(snapshot)
       }
     } catch {
@@ -295,6 +286,8 @@ function createStockDataStore() {
       refPrice,
       lastUpdate: latest.time || new Date().toISOString(),
       syncedAt: historyResult.value.last_synced_at || historyResult.value.data[historyResult.value.data.length - 1]?.time || null,
+      priceSource: 'eod_snapshot',
+      dataStatus: latestClose > 0 ? 'DATA_AVAILABLE' : 'NO_DATA_IN_SNAPSHOT',
       logoColor: getSymbolColor(upperSymbol),
     }
   }
@@ -311,7 +304,9 @@ function createStockDataStore() {
       }
 
       batch.data.forEach((item) => {
-        bySymbol.set(item.symbol.toUpperCase(), snapshotToState(item))
+        if (hasUsableSnapshotPrice(item)) {
+          bySymbol.set(item.symbol.toUpperCase(), snapshotToState(item))
+        }
       })
     } catch {
       // Continue with per-symbol fallback.
@@ -408,134 +403,6 @@ function createStockDataStore() {
     }
   }
 
-  function connectRealtime(token?: string): void {
-    if (!ENABLE_REALTIME) {
-      isConnected.value = false
-      error.value = null
-      startPolling(BACKEND_POLLING_MS)
-      return
-    }
-
-    unsubscribeConnection?.()
-    unsubscribeConnection = dnseWebSocket.onConnectionChange((status) => {
-      isConnected.value = status === 'connected'
-
-      if (status === 'connected') {
-        error.value = null
-        stopPolling()
-        return
-      }
-
-      if (status === 'fallback') {
-        const intervalSeconds = Math.round(BACKEND_POLLING_MS / 1000)
-        error.value = `Realtime unavailable. Switched to polling every ${intervalSeconds} seconds.`
-        startPolling(BACKEND_POLLING_MS)
-      }
-    })
-
-    dnseWebSocket.connect(token)
-
-    const allSymbols = allRequestedSymbols.value
-    unsubscribeWs?.()
-    unsubscribeWs = dnseWebSocket.subscribeMultiple(allSymbols, (quote: RealtimeQuote) => {
-      updateFromRealtime(quote)
-
-      if (backendAvailable.value) {
-        saveQuotesBuffer.push({
-          symbol: quote.symbol,
-          price: quote.price,
-          change: quote.change,
-          changePercent: quote.changePercent,
-          volume: quote.volume,
-          high: quote.high,
-          low: quote.low,
-          open: quote.open,
-          time: quote.time || new Date().toISOString(),
-        })
-      }
-    })
-
-    if (backendAvailable.value) {
-      startQuotesPersistTimer()
-    }
-  }
-
-  function startQuotesPersistTimer(): void {
-    if (saveQuotesTimer) return
-
-    saveQuotesTimer = setInterval(() => {
-      void flushBufferedQuotes()
-    }, 10000)
-  }
-
-  async function flushBufferedQuotes(): Promise<void> {
-    if (!backendAvailable.value || saveQuotesBuffer.length === 0) return
-
-    const batch = [...saveQuotesBuffer]
-    saveQuotesBuffer = []
-
-    try {
-      await stockBackendApi.saveRealtimeQuotes(batch)
-    } catch {
-      // Put quotes back at the front when save fails to avoid data loss.
-      saveQuotesBuffer = [...batch, ...saveQuotesBuffer]
-    }
-  }
-
-  function startPolling(intervalMs: number = BACKEND_POLLING_MS): void {
-    stopPolling()
-
-    pollingTimer = setInterval(async () => {
-      try {
-        const allSymbols = allRequestedSymbols.value
-
-        if (backendAvailable.value) {
-          await loadFromBackend(allSymbols)
-          return
-        }
-
-        const quotes = await dnseApi.getMultipleQuotes(allSymbols)
-
-        quotes.forEach((quote) => {
-          stocks[quote.symbol] = quoteToState(quote)
-        })
-
-        lastRefresh.value = new Date()
-      } catch {
-        // Silent polling fail.
-      }
-    }, intervalMs)
-  }
-
-  function stopPolling(): void {
-    if (pollingTimer) {
-      clearInterval(pollingTimer)
-      pollingTimer = null
-    }
-  }
-
-  function updateFromRealtime(quote: RealtimeQuote): void {
-    const existing = stocks[quote.symbol]
-
-    stocks[quote.symbol] = {
-      symbol: quote.symbol,
-      companyName: existing?.companyName || quote.symbol,
-      price: quote.price || existing?.price || 0,
-      change: quote.change || existing?.change || 0,
-      changePercent: quote.changePercent || existing?.changePercent || 0,
-      volume: quote.volume || existing?.volume || 0,
-      high: quote.high || existing?.high || 0,
-      low: quote.low || existing?.low || 0,
-      open: quote.open || existing?.open || 0,
-      refPrice: existing?.refPrice || 0,
-      lastUpdate: quote.time || new Date().toISOString(),
-      syncedAt: existing?.syncedAt || null,
-      logoColor: existing?.logoColor || getSymbolColor(quote.symbol),
-    }
-
-    lastRefresh.value = new Date()
-  }
-
   async function loadSymbolData(symbol: string): Promise<void> {
     const upperSymbol = symbol.toUpperCase()
 
@@ -620,33 +487,13 @@ function createStockDataStore() {
     symbol: string,
     limit: number = 365,
   ): Promise<TechnicalResponse | null> {
-    if (!backendAvailable.value) {
-      return null
-    }
-
     try {
-      return await stockBackendApi.getTechnicalAnalysis(symbol, undefined, undefined, limit)
+      const response = await stockBackendApi.getTechnicalAnalysis(symbol, undefined, undefined, limit)
+      backendAvailable.value = true
+      return response
     } catch {
       return null
     }
-  }
-
-  function cleanup(): void {
-    unsubscribeWs?.()
-    unsubscribeWs = null
-
-    unsubscribeConnection?.()
-    unsubscribeConnection = null
-
-    stopPolling()
-    dnseWebSocket.disconnect()
-
-    if (saveQuotesTimer) {
-      clearInterval(saveQuotesTimer)
-      saveQuotesTimer = null
-    }
-
-    saveQuotesBuffer = []
   }
 
   function quoteToState(quote: StockQuote): StockState {
@@ -663,6 +510,8 @@ function createStockDataStore() {
       refPrice: quote.refPrice,
       lastUpdate: quote.updatedAt,
       syncedAt: null,
+      priceSource: 'dnse_live',
+      dataStatus: 'DATA_AVAILABLE',
       logoColor: getSymbolColor(quote.symbol),
     }
   }
@@ -671,27 +520,27 @@ function createStockDataStore() {
     stocks,
     watchlist,
     featuredSymbols,
-    isConnected,
+    isConnected: computed(() => stockPriceStore.connectionMode.value === 'realtime'),
     isLoading,
     error,
-    lastRefresh,
+    lastRefresh: computed(() => (
+      stockPriceStore.lastRefreshAt.value
+        ? new Date(stockPriceStore.lastRefreshAt.value)
+        : lastRefresh.value
+    )),
     lastDataSyncAt,
-    backendAvailable,
-    connectionMode,
+    backendAvailable: stockPriceStore.backendAvailable,
+    connectionMode: stockPriceStore.connectionMode,
     hasUsableData,
 
     featuredStocks,
     watchlistStocks,
 
     fetchInitialData,
-    connectRealtime,
-    startPolling,
-    stopPolling,
     addToWatchlist,
     removeFromWatchlist,
     getHistoricalData,
     getTechnicalAnalysis,
-    cleanup,
   }
 }
 

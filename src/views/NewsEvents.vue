@@ -216,10 +216,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { useStockData, VN30_TICKERS } from '@/composables/useStockData'
+import { usePriceSubscription } from '@/composables/usePriceSubscription'
 import { stockBackendApi } from '@/services/stockBackendApi'
 
 type ImpactLevel = 'High' | 'Medium' | 'Low'
@@ -280,7 +281,8 @@ const hotKeywords = [
 ]
 
 const router = useRouter()
-const { stocks, fetchInitialData, connectRealtime, startPolling, cleanup } = useStockData()
+const { stocks, fetchInitialData } = useStockData()
+usePriceSubscription('news-events-prices', () => VN30_TICKERS)
 
 const impactOptions = ['All', 'High', 'Medium', 'Low'] as const
 const selectedImpact = ref<(typeof impactOptions)[number]>('All')
@@ -301,7 +303,7 @@ const selectedSectorSymbols = computed(() => {
 
 const topMovers = computed(() =>
   Object.values(stocks)
-    .filter((stock) => stock.price > 0)
+    .filter((stock) => hasUsableSnapshotPrice(stock))
     .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
     .slice(0, 6),
 )
@@ -456,6 +458,10 @@ function goToStock(symbol: string): void {
   void router.push(`/stocks/${symbol}`)
 }
 
+function hasUsableSnapshotPrice(item: { price?: number; dataStatus?: string } | null | undefined): boolean {
+  return Boolean(item && Number(item.price) > 0 && item.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
+}
+
 watch(selectedSymbol, () => {
   if (selectedSymbol.value !== 'all') {
     selectedSector.value = 'all'
@@ -471,14 +477,6 @@ onMounted(async () => {
   await fetchInitialData()
   await loadNewsAndEvents()
 
-  try {
-    connectRealtime()
-  } catch {
-    startPolling(5000)
-  }
 })
 
-onUnmounted(() => {
-  cleanup()
-})
 </script>

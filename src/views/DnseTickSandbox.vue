@@ -7,8 +7,8 @@
           <h1 class="mt-1 text-2xl font-semibold text-white">Realtime latest trades</h1>
         </div>
         <div class="flex items-center gap-2 text-sm text-slate-300">
-          <span class="h-2.5 w-2.5 rounded-full" :class="isPolling ? 'bg-emerald-400' : 'bg-slate-500'" />
-          {{ isPolling ? 'Polling' : 'Stopped' }}
+          <span class="h-2.5 w-2.5 rounded-full" :class="marketSessionDotClass" />
+          {{ marketSessionLabel }}
         </div>
       </header>
 
@@ -28,7 +28,7 @@
               <button v-else class="btn-danger" type="button" @click="stopPolling">Stop</button>
             </div>
             <p class="mt-2 text-xs text-slate-400">
-              Poll interval: {{ pollIntervalMs }}ms. Route nay chi de test, khong dat lenh.
+              Poll interval: {{ effectivePollIntervalMs }}ms. Route nay chi de test, khong dat lenh.
             </p>
           </div>
 
@@ -46,25 +46,27 @@
           </div>
 
           <div class="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
-            <div class="grid grid-cols-6 border-b border-slate-800 px-4 py-3 text-xs font-semibold uppercase text-slate-400">
+            <div class="grid grid-cols-7 border-b border-slate-800 px-4 py-3 text-xs font-semibold uppercase text-slate-400">
               <span>Symbol</span>
               <span>Price</span>
               <span>Volume</span>
               <span class="col-span-2">Trade time</span>
+              <span>Source</span>
               <span>Latency</span>
             </div>
             <div v-if="ticks.length === 0" class="px-4 py-10 text-center text-sm text-slate-400">
-              Chua co tick. Bam Refresh once hoac Start de test DNSE.
+              {{ emptyTickMessage }}
             </div>
             <div
               v-for="tick in ticks"
               :key="tick.symbol"
-              class="grid grid-cols-6 items-center border-b border-slate-800 px-4 py-3 text-sm last:border-b-0"
+              class="grid grid-cols-7 items-center border-b border-slate-800 px-4 py-3 text-sm last:border-b-0"
             >
               <span class="font-semibold text-white">{{ tick.symbol }}</span>
               <span class="tabular-nums text-emerald-300">{{ formatNumber(tick.price) }}</span>
               <span class="tabular-nums">{{ formatNumber(tick.volume) }}</span>
-              <span class="col-span-2 truncate text-slate-300">{{ tick.trade_time || '-' }}</span>
+              <span class="col-span-2 truncate text-slate-300">{{ formatTradeTime(tick) }}</span>
+              <span class="text-xs uppercase text-amber-300">{{ tick.storage_source || latestResponse?.data_source || '-' }}</span>
               <span class="tabular-nums text-slate-300">{{ tick.latency_ms ?? '-' }}ms</span>
             </div>
           </div>
@@ -85,6 +87,14 @@
                 <dd>{{ status?.board_id || '-' }}</dd>
               </div>
               <div class="flex justify-between gap-3">
+                <dt class="text-slate-400">Market</dt>
+                <dd>{{ marketSessionLabel }}</dd>
+              </div>
+              <div class="flex justify-between gap-3">
+                <dt class="text-slate-400">Next open</dt>
+                <dd>{{ formatSessionTime(status?.market_session?.next_open_at) }}</dd>
+              </div>
+              <div class="flex justify-between gap-3">
                 <dt class="text-slate-400">Backend latency</dt>
                 <dd>{{ latestResponse?.latency_ms ?? '-' }}ms</dd>
               </div>
@@ -93,6 +103,10 @@
                 <dd>{{ lastRefresh || '-' }}</dd>
               </div>
             </dl>
+          </div>
+
+          <div v-if="staleNotice" class="rounded-lg border border-amber-700 bg-amber-950/50 p-4 text-sm text-amber-100">
+            {{ staleNotice }}
           </div>
 
           <div v-if="errorMessage" class="rounded-lg border border-red-800 bg-red-950/60 p-4 text-sm text-red-100">
@@ -145,12 +159,70 @@ let lineSeries: ISeriesApi<'Line', Time> | null = null
 let resizeObserver: ResizeObserver | null = null
 
 const pollIntervalMs = computed(() => status.value?.poll_interval_ms || 2000)
+const effectivePollIntervalMs = computed(() => {
+  if (status.value?.market_session?.is_polling_allowed === false) {
+    return (status.value.closed_heartbeat_seconds || 300) * 1000
+  }
+  return pollIntervalMs.value
+})
 const rawJson = computed(() => JSON.stringify(latestResponse.value || status.value || {}, null, 2))
 const chartPointCount = computed(() => tickHistory.value.length)
+const marketSession = computed(() => latestResponse.value?.market_session || status.value?.market_session || null)
+const missingSymbolsLabel = computed(() => (latestResponse.value?.missing_symbols || []).join(', '))
+const emptyTickMessage = computed(() => {
+  if (latestResponse.value?.status === 'market_closed') {
+    return 'Chua co tick da luu cho cac ma duoc chon.'
+  }
+  return 'Chua co tick. Bam Refresh once hoac Start de test DNSE.'
+})
+const staleNotice = computed(() => {
+  if (!latestResponse.value?.is_stale || ticks.value.length === 0) return ''
+  const latest = [...ticks.value].sort(
+    (a, b) => Date.parse(b.trade_time_local || b.trade_time || '') - Date.parse(a.trade_time_local || a.trade_time || ''),
+  )[0]
+  const missing = missingSymbolsLabel.value ? ` Thieu du lieu da luu cho: ${missingSymbolsLabel.value}.` : ''
+  return `Thi truong da dong cua. Dang hien thi tick gan nhat luc ${formatTradeTime(latest)}.${missing}`
+})
+const marketSessionLabel = computed(() => {
+  const session = marketSession.value
+  if (!session) return isPolling.value ? 'Polling' : 'Stopped'
+  const labels: Record<string, string> = {
+    pre_open: 'Pre-open',
+    open: isPolling.value ? 'Live polling' : 'Market open',
+    lunch_break: 'Lunch break',
+    closing: isPolling.value ? 'Closing polling' : 'Closing window',
+    closed: 'Market closed',
+    weekend: 'Weekend',
+    holiday: 'Holiday',
+    unknown: 'Unknown session',
+  }
+  return labels[session.status] || session.status
+})
+const marketSessionDotClass = computed(() => {
+  const session = marketSession.value
+  if (session?.is_polling_allowed) return isPolling.value ? 'bg-emerald-400' : 'bg-cyan-400'
+  if (session) return 'bg-amber-400'
+  return isPolling.value ? 'bg-emerald-400' : 'bg-slate-500'
+})
 
 function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return '-'
   return new Intl.NumberFormat('vi-VN').format(value)
+}
+
+function formatSessionTime(value: string | null | undefined): string {
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString('vi-VN')
+}
+
+function formatTradeTime(tick: DnseTick): string {
+  const value = tick.trade_time_local || tick.trade_time
+  if (!value) return '-'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
 }
 
 async function loadStatus(): Promise<void> {
@@ -219,7 +291,7 @@ function updateChartFromTicks(nextTicks: DnseTick[]): void {
   if (selectedTick.price === null) return
 
   const point: LineData<Time> = {
-    time: toUtcTimestamp(selectedTick.trade_time),
+    time: toUtcTimestamp(selectedTick.trade_time_local || selectedTick.trade_time),
     value: selectedTick.price,
   }
   const withoutSameTime = tickHistory.value.filter((item) => Number(item.time) !== Number(point.time))
@@ -241,7 +313,9 @@ async function refreshOnce(): Promise<void> {
     ticks.value = response.ticks
     updateChartFromTicks(response.ticks)
     lastRefresh.value = new Date().toLocaleTimeString('vi-VN')
-    if (response.status === 'not_configured') {
+    if (response.status === 'market_closed' && response.ticks.length === 0) {
+      errorMessage.value = response.errors.market_session || 'market_closed'
+    } else if (response.status === 'not_configured') {
       errorMessage.value = response.errors.config || 'DNSE credentials are not configured.'
     } else if (Object.keys(response.errors || {}).length > 0) {
       errorMessage.value = Object.entries(response.errors)
@@ -258,7 +332,7 @@ function scheduleNextPoll(): void {
   pollingTimer = window.setTimeout(async () => {
     await refreshOnce()
     scheduleNextPoll()
-  }, pollIntervalMs.value)
+  }, effectivePollIntervalMs.value)
 }
 
 async function startPolling(): Promise<void> {

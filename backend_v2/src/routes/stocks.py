@@ -7,8 +7,10 @@ indicators, and financial reports.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
@@ -19,8 +21,10 @@ from src.cache import (
     _load_technical_cache,
     _save_technical_cache,
 )
+from src.database.data_lake import read_latest_session_ticks_from_parquet
 from src.database.models import CompanyOverviewCache
 from src.market_data_status import DATA_AVAILABLE, NO_DATA_IN_SNAPSHOT, reject_refresh_in_snapshot_mode
+from src.services.dnse_realtime_provider import dnse_realtime_provider
 from src.services.vnstock_fetcher import (
     VN30_SYMBOLS,
     fetcher_service,
@@ -37,12 +41,15 @@ from src.utils import (
     _row_is_fresh,
     _row_iso_timestamp,
     _to_float,
+    _to_int,
     _to_number_or_none,
     _utc_now,
 )
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+REPO_ROOT = Path(__file__).resolve().parents[3]
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 # Constants (mirror from main until fully extracted)
 INTRADAY_STALE_SECONDS = settings.vnstock_intraday_stale_seconds
@@ -71,6 +78,23 @@ def _intraday_cache_is_stale(max_age_seconds: int = INTRADAY_STALE_SECONDS) -> b
 # ── Private helpers ───────────────────────────────────────────────────
 
 
+async def _refresh_dnse_realtime(symbols: list[str]) -> dict[str, Any]:
+    in_session = fetcher_service.is_intraday_fetch_window()
+    return await dnse_realtime_provider.refresh_symbols(symbols, in_session=in_session)
+
+
+def _dnse_source_label(result: dict[str, Any], fallback: str) -> str:
+    return "dnse-realtime-cache" if result.get("status") in {"ok", "cached"} else fallback
+
+
+def _load_intraday_ticks(symbol: str, limit: int) -> tuple[list[dict[str, Any]], str]:
+    cache_payload = fetcher_service.get_intraday_cache_view(symbols=[symbol], limit=limit)
+    ticks = cache_payload.get(symbol, [])
+    if ticks:
+        return ticks, "intraday-cache"
+    return read_latest_session_ticks_from_parquet(symbol), "intraday-parquet"
+
+
 def _validate_vn30_symbol(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
     if not is_vn30_symbol(normalized):
@@ -84,12 +108,94 @@ async def _load_history_data(
     end_date: Optional[date],
     limit: int,
 ) -> list[dict[str, Any]]:
-    return await fetcher_service.load_history_from_db_async(
+    records, _source = await _load_history_data_with_source(
         symbol,
         start_date=start_date,
         end_date=end_date,
         limit=limit,
     )
+    return records
+
+
+async def _load_history_data_with_source(
+    symbol: str,
+    start_date: Optional[date],
+    end_date: Optional[date],
+    limit: int,
+) -> tuple[list[dict[str, Any]], str]:
+    lake_records = _load_history_from_gold_lake(
+        symbol,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+    if lake_records:
+        return lake_records, "lake-gold-market-features"
+
+    records = await fetcher_service.load_history_from_db_async(
+        symbol,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
+    if records:
+        return records, "duckdb"
+    return [], "snapshot-history-missing"
+
+
+def _load_history_from_gold_lake(
+    symbol: str,
+    start_date: Optional[date],
+    end_date: Optional[date],
+    limit: int,
+) -> list[dict[str, Any]]:
+    parquet_path = (
+        REPO_ROOT
+        / "lake"
+        / "gold"
+        / "market_features"
+        / "by_symbol"
+        / f"symbol={symbol.upper()}"
+        / "latest.parquet"
+    )
+    if not parquet_path.exists():
+        return []
+
+    try:
+        frame = pd.read_parquet(parquet_path)
+    except Exception:
+        logger.warning("Could not read gold lake history for %s.", symbol, exc_info=True)
+        return []
+
+    required_columns = ["data_date", "open_price", "high_price", "low_price", "close_price"]
+    if any(column not in frame.columns for column in required_columns):
+        return []
+
+    rows = frame.copy()
+    rows["data_date"] = pd.to_datetime(rows["data_date"], errors="coerce").dt.date
+    rows = rows.dropna(subset=["data_date", "close_price"])
+    if isinstance(start_date, date):
+        rows = rows[rows["data_date"] >= start_date]
+    if isinstance(end_date, date):
+        rows = rows[rows["data_date"] <= end_date]
+
+    rows = rows.sort_values("data_date").tail(max(limit, 1))
+    output: list[dict[str, Any]] = []
+    for raw in rows.to_dict("records"):
+        close = _to_float(raw.get("close_price"))
+        if close <= 0:
+            continue
+        output.append(
+            {
+                "time": str(raw.get("data_date")),
+                "open": _to_float(raw.get("open_price"), fallback=close),
+                "high": _to_float(raw.get("high_price"), fallback=close),
+                "low": _to_float(raw.get("low_price"), fallback=close),
+                "close": close,
+                "volume": _to_int(raw.get("volume")) if "volume" in raw else 0,
+            }
+        )
+    return output
 
 
 def _calculate_technical_payload(symbol: str, history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -104,6 +210,46 @@ def _calculate_technical_payload(symbol: str, history: list[dict[str, Any]]) -> 
         close_col="close",
         volume_col="volume",
     )
+
+
+def _normalize_legacy_manual_tick_time(tick: dict[str, Any]) -> dict[str, Any]:
+    if str(tick.get("match_type") or "").lower() != "manual":
+        return tick
+
+    parsed = _parse_datetime(tick.get("time"))
+    if parsed is None:
+        return tick
+
+    local_time = parsed.astimezone(VN_TZ)
+    if local_time.hour < 16:
+        return tick
+
+    normalized = dict(tick)
+    normalized["time"] = (local_time - timedelta(hours=7)).isoformat()
+    return normalized
+
+
+def _normalize_order_tick(tick: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_legacy_manual_tick_time(tick)
+    output = dict(normalized)
+    output["match_type"] = str(output.get("match_type") or "unknown")
+    output["side_source"] = str(output.get("side_source") or "missing")
+    output["side_confidence"] = str(output.get("side_confidence") or "unknown")
+    if output["match_type"].lower() == "manual":
+        output["match_type"] = "unknown"
+    return output
+
+
+def _market_cap_from_overview(snapshot: dict[str, Any], overview: dict[str, Any]) -> Optional[float]:
+    price = _to_float(snapshot.get("price"))
+    shares = _to_number_or_none(
+        overview.get("outstanding_shares")
+        or overview.get("issue_share")
+        or overview.get("listed_volume")
+    )
+    if price <= 0 or shares is None or shares <= 0:
+        return None
+    return price * 1000 * shares
 
 
 # ── Routes ────────────────────────────────────────────────────────────
@@ -121,8 +267,10 @@ async def get_snapshots(
 ) -> dict[str, Any]:
     reject_refresh_in_snapshot_mode(refresh)
     target_symbols = parse_symbols_query(symbols, fallback=VN30_SYMBOLS)
+    dnse_result = await _refresh_dnse_realtime(target_symbols)
     in_session = fetcher_service.is_intraday_fetch_window()
     snapshots = fetcher_service.get_snapshots(target_symbols)
+    has_usable_snapshot = any(_to_float(item.get("price")) > 0 for item in snapshots)
     synced_candidates = [
         item.get("syncedAt")
         for item in snapshots
@@ -135,12 +283,13 @@ async def get_snapshots(
         "data": snapshots,
         "cached_at": datetime.now(timezone.utc).isoformat(),
         "last_synced_at": latest_sync,
-        "source": "snapshot-mysql-cache",
+        "source": _dnse_source_label(dnse_result, "snapshot-mysql-cache"),
+        "dnse_realtime": dnse_result,
         "refreshed": False,
         "auto_refreshed": False,
         "is_in_session": in_session,
         "cache_age_seconds": _intraday_cache_age_seconds(),
-        "data_status": DATA_AVAILABLE if snapshots else NO_DATA_IN_SNAPSHOT,
+        "data_status": DATA_AVAILABLE if has_usable_snapshot else NO_DATA_IN_SNAPSHOT,
     }
 
 
@@ -176,6 +325,7 @@ async def get_overview(
         ratios_synced_at = cached_ratio_synced_at
 
     valuation = _extract_valuation_from_ratios(ratio_records)
+    market_cap = valuation.get("market_cap") or _market_cap_from_overview(snapshot, overview_payload)
     company_name = (
         str(
             overview_payload.get("company_name")
@@ -218,7 +368,7 @@ async def get_overview(
         "eps": valuation.get("eps"),
         "roe": valuation.get("roe"),
         "roa": valuation.get("roa"),
-        "market_cap": valuation.get("market_cap"),
+        "market_cap": market_cap,
         "last_update": snapshot.get("lastUpdate"),
         "source": "mysql-cache",
         "last_synced_at": last_synced_at,
@@ -236,13 +386,13 @@ async def get_history(
 ) -> dict[str, Any]:
     reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
-    records = await _load_history_data(normalized, start_date=start_date, end_date=end_date, limit=limit)
+    records, source = await _load_history_data_with_source(normalized, start_date=start_date, end_date=end_date, limit=limit)
 
     return {
         "symbol": normalized,
         "count": len(records),
         "data": records,
-        "source": "duckdb",
+        "source": source,
         "last_synced_at": fetcher_service.last_history_sync_at.get(normalized),
         "data_status": DATA_AVAILABLE if records else NO_DATA_IN_SNAPSHOT,
     }
@@ -252,17 +402,17 @@ async def get_history(
 async def get_intraday(
     symbol: str,
     limit: int = Query(default=320, ge=10, le=2000),
-    interval_minutes: int = Query(default=1, ge=1, le=30),
+    interval_minutes: int = Query(default=1, ge=1, le=240),
     refresh: bool = Query(default=False, description="Force refresh intraday from vnstock before reading cache"),
     force: bool = Query(default=False, description="Allow refresh outside trading session windows (debug)"),
 ) -> dict[str, Any]:
     reject_refresh_in_snapshot_mode(refresh)
     del force
     normalized = _validate_vn30_symbol(symbol)
+    dnse_result = await _refresh_dnse_realtime([normalized])
 
     tick_window = min(max(limit * max(interval_minutes, 1) * 12, 600), 5000)
-    cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=tick_window)
-    ticks = cache_payload.get(normalized, [])
+    ticks, tick_source = _load_intraday_ticks(normalized, tick_window)
     bars = _build_intraday_bars_from_ticks(ticks, interval_minutes=interval_minutes)
 
     if len(bars) > limit:
@@ -274,7 +424,8 @@ async def get_intraday(
         "ticks_count": len(ticks),
         "data": bars,
         "interval_minutes": interval_minutes,
-        "source": "intraday-cache",
+        "source": tick_source if tick_source == "intraday-parquet" else _dnse_source_label(dnse_result, "intraday-cache"),
+        "dnse_realtime": dnse_result,
         "last_synced_at": fetcher_service.last_intraday_sync_at,
         "is_in_session": fetcher_service.is_intraday_fetch_window(),
         "refreshed": False,
@@ -295,9 +446,13 @@ async def get_ticks(
     del force
     normalized = _validate_vn30_symbol(symbol)
     in_session = fetcher_service.is_intraday_fetch_window()
+    dnse_result = await _refresh_dnse_realtime([normalized])
 
-    cache_payload = fetcher_service.get_intraday_cache_view(symbols=[normalized], limit=limit)
-    ticks: list[dict] = cache_payload.get(normalized, [])
+    raw_ticks, tick_source = _load_intraday_ticks(normalized, limit)
+    ticks: list[dict] = [
+        _normalize_order_tick(tick)
+        for tick in raw_ticks
+    ]
 
     # Return most-recent first for order log display.
     ticks_desc = sorted(
@@ -312,6 +467,8 @@ async def get_ticks(
         "ticks": ticks_desc,
         "is_in_session": in_session,
         "last_synced_at": fetcher_service.last_intraday_sync_at,
+        "source": tick_source if tick_source == "intraday-parquet" else _dnse_source_label(dnse_result, "intraday-cache"),
+        "dnse_realtime": dnse_result,
         "refreshed": False,
         "auto_refreshed": False,
         "cache_age_seconds": _intraday_cache_age_seconds(),
@@ -329,7 +486,7 @@ async def get_technical(
 ) -> dict[str, Any]:
     reject_refresh_in_snapshot_mode(refresh)
     normalized = _validate_vn30_symbol(symbol)
-    records = await _load_history_data(normalized, start_date=start_date, end_date=end_date, limit=limit)
+    records, history_source = await _load_history_data_with_source(normalized, start_date=start_date, end_date=end_date, limit=limit)
 
     if not records:
         return {
@@ -338,7 +495,7 @@ async def get_technical(
             "ohlcv": {"time": [], "open": [], "high": [], "low": [], "close": [], "volume": []},
             "indicators": {},
             "signals": {},
-            "source": "duckdb",
+            "source": history_source,
             "last_synced_at": None,
             "data_status": NO_DATA_IN_SNAPSHOT,
         }
@@ -376,7 +533,7 @@ async def get_technical(
         history_last_time=history_last_time,
         payload=payload,
     )
-    payload["source"] = "duckdb"
+    payload["source"] = history_source
     payload["last_synced_at"] = fetcher_service.last_history_sync_at.get(normalized) or technical_synced_at
     payload["data_status"] = DATA_AVAILABLE
     return payload

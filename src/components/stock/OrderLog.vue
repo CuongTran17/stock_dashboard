@@ -89,7 +89,8 @@
             <td class="py-1.5 text-center">
               <span
                 class="inline-block min-w-[42px] rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                :class="badgeClass(tick.match_type)"
+                :class="badgeClass(tick)"
+                :title="sideTitle(tick)"
               >
                 {{ sideLabel(tick.match_type) }}
               </span>
@@ -116,6 +117,8 @@ export interface OrderTick {
   price: number
   volume: number
   match_type: string
+  side_source?: string
+  side_confidence?: string
 }
 
 const props = defineProps<{
@@ -155,7 +158,8 @@ function sideLabel(matchType: string): string {
   if (mt === 'atc') return 'ATC'
   if (mt === 'ato') return 'ATO'
   if (mt === 'lo') return 'LO'
-  return matchType || '—'
+  if (mt === 'unknown' || mt === 'manual') return '?'
+  return matchType || '?'
 }
 
 function isBuy(matchType: string): boolean {
@@ -174,8 +178,18 @@ function priceClass(matchType: string): string {
   return 'text-gray-800 dark:text-white/80'
 }
 
-function badgeClass(matchType: string): string {
+function sideTitle(tick: OrderTick): string {
+  if (tick.side_confidence === 'source') return 'Phân loại từ DNSE'
+  if (tick.side_confidence === 'inferred') return 'Suy luận theo biến động giá tick trước'
+  return 'Nguồn không cung cấp chiều mua/bán'
+}
+
+function badgeClass(tick: OrderTick): string {
+  const matchType = tick.match_type
+  const confidence = tick.side_confidence || 'unknown'
+  if (isBuy(matchType) && confidence === 'inferred') return 'bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-300'
   if (isBuy(matchType)) return 'bg-success-100 text-success-700 dark:bg-success-500/20 dark:text-success-300'
+  if (isSell(matchType) && confidence === 'inferred') return 'bg-error-50 text-error-700 dark:bg-error-500/10 dark:text-error-300'
   if (isSell(matchType)) return 'bg-error-100 text-error-700 dark:bg-error-500/20 dark:text-error-300'
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
 }

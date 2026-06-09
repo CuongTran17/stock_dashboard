@@ -158,9 +158,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { useStockData } from '@/composables/useStockData'
+import { usePriceSubscription } from '@/composables/usePriceSubscription'
 
 interface PortfolioPosition {
   symbol: string
@@ -178,10 +179,7 @@ interface PriceAlert {
 const {
   stocks,
   fetchInitialData,
-  connectRealtime,
-  startPolling,
   addToWatchlist,
-  cleanup,
 } = useStockData()
 
 const positions = ref<PortfolioPosition[]>([
@@ -196,6 +194,12 @@ const alerts = ref<PriceAlert[]>([
   { id: 2, symbol: 'VCB', targetPrice: 90000, direction: 'below' },
 ])
 
+const subscribedSymbols = computed(() => [
+  ...positions.value.map((position) => position.symbol),
+  ...alerts.value.map((alert) => alert.symbol),
+])
+usePriceSubscription('portfolio-alerts', () => subscribedSymbols.value)
+
 const newAlert = reactive({
   symbol: 'FPT',
   targetPrice: 0,
@@ -205,7 +209,9 @@ const newAlert = reactive({
 const currentPriceMap = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   Object.values(stocks).forEach((stock) => {
-    map[stock.symbol] = stock.price
+    if (stock.price > 0 && stock.dataStatus !== 'NO_DATA_IN_SNAPSHOT') {
+      map[stock.symbol] = stock.price
+    }
   })
   return map
 })
@@ -277,7 +283,6 @@ function addAlert(): void {
     direction: newAlert.direction,
   })
 
-  addToWatchlist(symbol)
   newAlert.targetPrice = 0
 }
 
@@ -293,14 +298,6 @@ onMounted(async () => {
   alerts.value.forEach((alert) => watchSymbols.add(alert.symbol))
   watchSymbols.forEach((symbol) => addToWatchlist(symbol))
 
-  try {
-    connectRealtime()
-  } catch {
-    startPolling(5000)
-  }
 })
 
-onUnmounted(() => {
-  cleanup()
-})
 </script>

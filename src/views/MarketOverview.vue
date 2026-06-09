@@ -112,6 +112,7 @@
         <TradingViewChart
           v-else
           :symbol="activeIndexSymbol"
+          chart-kind="line"
           :historical-data="activeIndexHistory"
         />
       </section>
@@ -259,6 +260,7 @@ interface MarketStock {
   companyName: string
   price: number
   changePercent: number
+  dataStatus?: string
 }
 
 interface SectorDefinition {
@@ -307,7 +309,7 @@ const sectors: SectorDefinition[] = [
 
 const allStocks = computed<MarketStock[]>(() =>
   marketStocks.value
-    .filter((item) => item.price > 0)
+    .filter((item) => hasUsableSnapshotPrice(item))
     .sort((a, b) => b.changePercent - a.changePercent),
 )
 
@@ -350,7 +352,7 @@ const sectorPerformance = computed(() =>
     .map((sector) => {
       const members = sector.symbols
         .map((symbol) => stockBySymbol.value[symbol])
-        .filter((item): item is MarketStock => Boolean(item) && item.price > 0)
+        .filter((item): item is MarketStock => hasUsableSnapshotPrice(item))
 
       if (members.length === 0) {
         return {
@@ -377,6 +379,10 @@ function toNumber(value: unknown): number {
   return 0
 }
 
+function hasUsableSnapshotPrice(item: { price?: number; dataStatus?: string } | null | undefined): boolean {
+  return Boolean(item && Number(item.price) > 0 && item.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
+}
+
 function normalizeIndexQuote(record: MarketIndexQuote): IndexCard {
   return {
     symbol: String(record.symbol || '').toUpperCase(),
@@ -394,6 +400,7 @@ function normalizeSnapshot(item: StockSnapshot): MarketStock {
     companyName: (item.companyName || symbol || 'VN30').trim(),
     price: toNumber(item.price),
     changePercent: toNumber(item.changePercent),
+    dataStatus: item.dataStatus,
   }
 }
 

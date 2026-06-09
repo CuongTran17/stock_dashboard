@@ -16,6 +16,7 @@ from sqlalchemy import select
 from src.database.db import AsyncSessionLocal
 from src.database.market_duckdb import TechnicalCacheRow, market_repo
 from src.database.models import FinancialReportCache
+from src.settings import get_settings
 from src.utils import _json_dumps, _json_loads, _row_is_fresh, _row_iso_timestamp
 
 logger = logging.getLogger(__name__)
@@ -140,13 +141,20 @@ async def _load_technical_cache(
     end_date: Optional[date],
     limit: int,
 ) -> tuple[Optional[TechnicalCacheRow], Optional[dict[str, Any]]]:
-    return await asyncio.to_thread(
-        market_repo.load_technical_cache,
-        symbol,
-        start_date,
-        end_date,
-        limit,
-    )
+    if not get_settings().duckdb_request_reads_enabled:
+        return None, None
+
+    try:
+        return await asyncio.to_thread(
+            market_repo.load_technical_cache,
+            symbol,
+            start_date,
+            end_date,
+            limit,
+        )
+    except Exception as exc:
+        logger.warning("Failed to load DuckDB technical cache for %s: %s", symbol, exc)
+        return None, None
 
 
 async def _save_technical_cache(
@@ -158,6 +166,9 @@ async def _save_technical_cache(
     history_last_time: Optional[str],
     payload: dict[str, Any],
 ) -> Optional[str]:
+    if not get_settings().duckdb_request_writes_enabled:
+        return None
+
     try:
         return await asyncio.to_thread(
             market_repo.upsert_technical_cache,

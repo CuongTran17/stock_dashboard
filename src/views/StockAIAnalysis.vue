@@ -529,7 +529,9 @@ const closeSeries = computed(() =>
 )
 
 const currentPrice = computed<number | null>(() => {
-  const fromSnapshot = snapshot.value ? toNumber(snapshot.value.price) : Number.NaN
+  const fromSnapshot = snapshot.value && hasUsableSnapshotPrice(snapshot.value)
+    ? toNumber(snapshot.value.price)
+    : Number.NaN
   if (Number.isFinite(fromSnapshot) && fromSnapshot > 0) {
     return fromSnapshot
   }
@@ -544,7 +546,9 @@ const previousClose = computed<number | null>(() => {
 })
 
 const currentChangePercent = computed<number | null>(() => {
-  const fromSnapshot = snapshot.value ? toNumber(snapshot.value.changePercent) : Number.NaN
+  const fromSnapshot = snapshot.value && hasUsableSnapshotPrice(snapshot.value)
+    ? toNumber(snapshot.value.changePercent)
+    : Number.NaN
   if (Number.isFinite(fromSnapshot)) {
     return fromSnapshot
   }
@@ -557,7 +561,9 @@ const currentChangePercent = computed<number | null>(() => {
 })
 
 const currentVolume = computed<number | null>(() => {
-  const fromSnapshot = snapshot.value ? toNumber(snapshot.value.volume) : Number.NaN
+  const fromSnapshot = snapshot.value && hasUsableSnapshotPrice(snapshot.value)
+    ? toNumber(snapshot.value.volume)
+    : Number.NaN
   if (Number.isFinite(fromSnapshot) && fromSnapshot >= 0) {
     return fromSnapshot
   }
@@ -740,6 +746,10 @@ function toNumber(value: unknown, fallback: number = Number.NaN): number {
   }
 
   return fallback
+}
+
+function hasUsableSnapshotPrice(item: { price?: number; dataStatus?: string } | null | undefined): boolean {
+  return Boolean(item && Number(item.price) > 0 && item.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -9,15 +9,44 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from src.services.dnse_realtime_provider import dnse_realtime_provider
 from src.services.vnstock_fetcher import fetcher_service, is_vn30_symbol, normalize_symbol
 from src.utils import _to_float
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["WebSocket"])
+
+
+async def _build_dnse_websocket_payloads(subscribed_symbols: set[str]) -> list[dict[str, Any]]:
+    symbols = sorted(subscribed_symbols)
+    in_session = fetcher_service.is_intraday_fetch_window()
+    await dnse_realtime_provider.refresh_symbols(symbols, in_session=in_session)
+
+    payloads: list[dict[str, Any]] = []
+    snapshots = fetcher_service.get_snapshots(symbols)
+    for snapshot in snapshots:
+        if _to_float(snapshot.get("price")) <= 0:
+            continue
+        payloads.append(
+            {
+                "symbol": snapshot.get("symbol"),
+                "price": _to_float(snapshot.get("price")),
+                "change": _to_float(snapshot.get("change")),
+                "changePercent": _to_float(snapshot.get("changePercent")),
+                "volume": int(_to_float(snapshot.get("volume"))),
+                "high": _to_float(snapshot.get("high")),
+                "low": _to_float(snapshot.get("low")),
+                "open": _to_float(snapshot.get("open")),
+                "time": str(snapshot.get("lastUpdate") or datetime.now(timezone.utc).isoformat()),
+                "source": "dnse-realtime-cache",
+            }
+        )
+    return payloads
 
 
 @router.websocket("/api/ws/dnse")
@@ -52,23 +81,8 @@ async def websocket_dnse_compatible(websocket: WebSocket):
                 await websocket.send_json({"type": "heartbeat"})
                 continue
 
-            snapshots = fetcher_service.get_snapshots(sorted(subscribed_symbols))
-            for snapshot in snapshots:
-                if _to_float(snapshot.get("price")) <= 0:
-                    continue
-                await websocket.send_json(
-                    {
-                        "symbol": snapshot.get("symbol"),
-                        "price": _to_float(snapshot.get("price")),
-                        "change": _to_float(snapshot.get("change")),
-                        "changePercent": _to_float(snapshot.get("changePercent")),
-                        "volume": int(_to_float(snapshot.get("volume"))),
-                        "high": _to_float(snapshot.get("high")),
-                        "low": _to_float(snapshot.get("low")),
-                        "open": _to_float(snapshot.get("open")),
-                        "time": str(snapshot.get("lastUpdate") or datetime.now(timezone.utc).isoformat()),
-                    }
-                )
+            for payload in await _build_dnse_websocket_payloads(subscribed_symbols):
+                await websocket.send_json(payload)
     except WebSocketDisconnect:
         logger.info("Client disconnected from /api/ws/dnse")
 

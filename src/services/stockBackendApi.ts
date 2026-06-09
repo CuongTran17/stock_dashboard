@@ -9,8 +9,13 @@ import { backendFetch, normalizeBackendUrl, type BackendFetchOptions } from './h
 const BACKEND_URL = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
 
 export interface HealthResponse {
-  status: 'ok' | 'error'
-  database: string
+  status: 'ok' | 'degraded' | 'error'
+  checked_at?: string
+  checks?: Record<string, { status: string; optional?: boolean }>
+}
+
+export function isBackendAvailableHealth(health: { status: string }): boolean {
+  return health.status !== 'error'
 }
 
 interface ApiMeta {
@@ -20,6 +25,17 @@ interface ApiMeta {
   run_id?: string | null
   stale?: boolean
   message?: string | null
+  dnse_realtime?: DnseRealtimeMeta
+}
+
+export interface DnseRealtimeMeta {
+  status: string
+  requested_symbols?: string[]
+  fetched_symbols?: string[]
+  fetched_count?: number
+  ingested_count?: number
+  latency_ms?: number
+  errors?: Record<string, string>
 }
 
 export type MarketDataStatus =
@@ -105,6 +121,8 @@ export interface OrderTick {
   price: number
   volume: number
   match_type: string
+  side_source?: 'dnse' | 'price_tick' | 'missing' | string
+  side_confidence?: 'source' | 'inferred' | 'unknown' | string
 }
 
 export interface TicksResponse extends ApiMeta {
@@ -157,6 +175,8 @@ export interface StockSnapshot {
   refPrice: number
   lastUpdate: string
   syncedAt?: string
+  priceSource?: 'dnse_live' | 'dnse_last_tick' | 'eod_snapshot' | 'no_data' | string
+  dataStatus?: 'DATA_AVAILABLE' | 'NO_DATA_IN_SNAPSHOT' | string
 }
 
 export interface SnapshotsResponse extends ApiMeta {
@@ -312,11 +332,13 @@ class StockBackendApi {
     limit: number = 320,
     refresh: boolean = false,
     force: boolean = false,
+    intervalMinutes: number = 1,
   ): Promise<IntradayResponse> {
     void refresh
     void force
     const query = this.buildQuery({
       limit,
+      interval_minutes: intervalMinutes,
     })
 
     return this.fetch<IntradayResponse>(`/api/stocks/${symbol.toUpperCase()}/intraday${query}`)

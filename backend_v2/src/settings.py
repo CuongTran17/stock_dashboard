@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     mysql_url: str = "mysql+mysqlconnector://root:@localhost/vnstock_data"
     mysql_async_url: str | None = None
     duckdb_path: str = "lake/warehouse/market.duckdb"
+    duckdb_request_reads_enabled: bool = False
+    duckdb_request_writes_enabled: bool = False
+    etl_run_on_backend_start: bool = False
     db_migrations_enabled: bool = True
     db_legacy_auto_ddl: bool = True
 
@@ -41,6 +44,18 @@ class Settings(BaseSettings):
     dnse_market_api_secret: str = ""
     dnse_market_board_id: str = "G1"
     dnse_tick_poll_interval_ms: int = Field(default=2000, ge=500, le=60000)
+    market_timezone: str = "Asia/Ho_Chi_Minh"
+    market_morning_start: str = "09:00"
+    market_morning_end: str = "11:30"
+    market_afternoon_start: str = "13:00"
+    market_afternoon_end: str = "14:45"
+    market_close_end: str = "15:00"
+    dnse_realtime_poll_when_closed: bool = False
+    dnse_realtime_closed_heartbeat_seconds: int = Field(default=300, ge=30)
+    dnse_realtime_enabled: bool = True
+    dnse_realtime_cache_ttl_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+    dnse_realtime_max_concurrency: int = Field(default=8, ge=1, le=30)
+    dnse_tick_parquet_flush_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
 
     etl_symbols: str = ""
     etl_lookback_days: int = Field(default=365, ge=1)

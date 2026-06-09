@@ -135,6 +135,9 @@ class EtlConfig:
     enable_mysql_load: bool = True
     enable_tick_eod: bool = True
     tick_source: str = "lake"  # "lake" | "redis" | "auto"
+    enable_dnse_tick_backfill: bool = True
+    dnse_tick_session_date: date | None = None
+    force_dnse_tick_backfill: bool = False
     run_mode: str = "full"  # "full" | "incremental" | "backfill"
     incremental_overlap_days: int = 7
     merge_with_latest: bool = True
@@ -211,6 +214,9 @@ class EtlConfig:
         enable_mysql_cache_load: bool | None = None,
         enable_tick_eod: bool = True,
         tick_source: str = "lake",
+        enable_dnse_tick_backfill: bool = True,
+        dnse_tick_session_date: str | date | None = None,
+        force_dnse_tick_backfill: bool = False,
         run_mode: str = "full",
         incremental_overlap_days: int = 7,
         merge_with_latest: bool = True,
@@ -234,6 +240,9 @@ class EtlConfig:
             enable_mysql_load=enable_mysql_load,
             enable_tick_eod=enable_tick_eod,
             tick_source=tick_source,
+            enable_dnse_tick_backfill=enable_dnse_tick_backfill,
+            dnse_tick_session_date=cls.parse_date(dnse_tick_session_date) if dnse_tick_session_date else None,
+            force_dnse_tick_backfill=force_dnse_tick_backfill,
             run_mode=run_mode,
             incremental_overlap_days=incremental_overlap_days,
             merge_with_latest=merge_with_latest,

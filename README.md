@@ -7,7 +7,7 @@
 ```text
 Vue 3 + TypeScript + Vite
         |
-        | REST API / WebSocket
+        | REST API / một WebSocket dùng chung
         v
 FastAPI backend
         |
@@ -22,7 +22,7 @@ FastAPI backend
 
 | Thành phần | Mô tả |
 |---|---|
-| Frontend | Dashboard, danh mục, phân tích cổ phiếu, admin, ETL monitor |
+| Frontend | Dashboard, danh mục, phân tích cổ phiếu, realtime price store dùng chung, admin, ETL monitor |
 | Backend | API FastAPI, auth JWT, payment SePay, portfolio, stock/market endpoints |
 | ETL | Lấy dữ liệu giá, chỉ số, tin tức, cơ bản, transform indicator và load snapshot |
 | Data lake | Lưu raw/processed/gold Parquet để tái lập snapshot |
@@ -90,6 +90,16 @@ DNSE_MARKET_API_KEY=your_dnse_openapi_key
 DNSE_MARKET_API_SECRET=your_dnse_openapi_secret
 DNSE_MARKET_BOARD_ID=G1
 DNSE_TICK_POLL_INTERVAL_MS=2000
+DNSE_TICK_PARQUET_FLUSH_SECONDS=30
+DNSE_REALTIME_POLL_WHEN_CLOSED=false
+DNSE_REALTIME_CLOSED_HEARTBEAT_SECONDS=300
+
+MARKET_TIMEZONE=Asia/Ho_Chi_Minh
+MARKET_MORNING_START=09:00
+MARKET_MORNING_END=11:30
+MARKET_AFTERNOON_START=13:00
+MARKET_AFTERNOON_END=14:45
+MARKET_CLOSE_END=15:00
 ```
 
 Ghi chú:
@@ -100,9 +110,10 @@ Ghi chú:
 
 ```env
 VITE_BACKEND_URL=http://127.0.0.1:8000
-VITE_ENABLE_REALTIME=false
 VITE_BACKEND_POLLING_MS=15000
 ```
+
+Frontend tự ưu tiên WebSocket và chuyển sang polling snapshot khi kết nối realtime không khả dụng. `VITE_BACKEND_POLLING_MS` điều chỉnh chu kỳ polling fallback.
 
 ### 4. Khởi tạo MySQL database
 
@@ -255,8 +266,33 @@ Các script frontend:
 | `npm run build` | Type-check và build production |
 | `npm run build-only` | Chỉ build Vite |
 | `npm run type-check` | Kiểm tra TypeScript/Vue |
+| `npm run test:unit` | Chạy unit test một lần bằng Vitest |
+| `npm run test:unit:watch` | Chạy Vitest ở watch mode |
 | `npm run lint` | Chạy ESLint và tự fix |
 | `npm run preview` | Preview bản build |
+
+## Realtime Giá Cổ Phiếu Trên Frontend
+
+Frontend quản lý giá hiện tại bằng một luồng realtime tập trung, thay vì để từng trang tự mở WebSocket hoặc tự polling:
+
+```text
+App.vue
+  └── realtimeManager
+        ├── WebSocket /api/ws/market
+        ├── polling fallback /api/stocks/snapshots
+        ├── symbolRegistry
+        └── stockPriceStore
+              └── các trang đọc cùng một nguồn giá
+```
+
+- `App.vue` khởi động và dừng duy nhất một `realtimeManager` theo vòng đời ứng dụng.
+- Mỗi trang dùng `usePriceSubscription(ownerId, symbols)` để khai báo các mã đang cần.
+- `symbolRegistry` gộp và đếm số nơi đang dùng từng mã; mã chỉ bị bỏ đăng ký khi không còn trang nào cần.
+- Quote từ WebSocket được ghi ngay vào `stockPriceStore`. Khi WebSocket lỗi, manager polling snapshot cho các mã đang active và tự thử kết nối lại.
+- Watchlist của người dùng và danh sách mã đang xem realtime là hai khái niệm riêng biệt.
+- Chỉ giá hiện tại tự cập nhật không cần reload trang. Lịch sử giá, technical, tin tức, sự kiện, tài chính và AI analysis vẫn giữ cách refresh hiện tại.
+
+Các trang đang dùng luồng giá tập trung gồm Dashboard, Stock Detail, My Portfolio, Portfolio Alerts, Stock Screener và News Events. Xem mô tả chi tiết tại `docs/frontend-realtime-architecture.md`.
 
 ## Cách Chạy ETL
 
@@ -514,6 +550,16 @@ http://localhost:5174/dnse-ticks
 
 Trang nay chi dung de test latest trade/tick read-only tu DNSE. Neu chua cau hinh `DNSE_MARKET_API_KEY` va `DNSE_MARKET_API_SECRET`, backend se tra `not_configured` de frontend hien thi loi cau hinh ro rang.
 
+Backend co market-hours guard cho DNSE realtime:
+
+- Trong phien `09:00-11:30`, `13:00-14:45`, va phien ATC/closing den `15:00`: `/api/dnse/ticks/latest` poll DNSE binh thuong.
+- Tick hop le duoc giu trong Redis hoac in-memory fallback va duoc flush atomic xuong `backend_v2/data_lake/ticks/YYYY-MM-DD/{symbol}.parquet` theo chu ky `DNSE_TICK_PARQUET_FLUSH_SECONDS`.
+- Ngoai phien, nghi trua, hoac cuoi tuan: endpoint khong poll DNSE nua ma doc last-known tick theo thu tu cache -> Parquet. Response giu `status=market_closed`, them `is_stale=true`, `data_source=cached_last_tick`, `missing_symbols`, kem `market_session` va `next_open_at`.
+- Frontend sandbox van hien tick da luu neu co, kem canh bao stale mau vang va giam nhip heartbeat theo `DNSE_REALTIME_CLOSED_HEARTBEAT_SECONDS`.
+- Neu chay local khong co Redis, cac tick trong in-memory co the mat sau backend restart neu chua kip flush Parquet.
+- Neu can test DNSE ngoai phien, dung `/api/dnse/ticks/debug?symbol=FPT` hoac tam thoi set `DNSE_REALTIME_POLL_WHEN_CLOSED=true`.
+- Guard nay giup tranh viec gia cu tu DNSE bi hien thi nhu realtime tick moi.
+
 Analysis:
 
 ```text
@@ -566,7 +612,11 @@ tailadmin-vuejs-1.0.0/
 ├── src/                         # Frontend Vue
 │   ├── views/
 │   ├── components/
+│   ├── composables/             # usePriceSubscription, useStockData
+│   ├── realtime/                # manager và registry symbol
 │   ├── services/
+│   ├── stores/                  # shared current-price store
+│   ├── test/                    # Vitest setup
 │   └── router/
 ├── backend_v2/                  # FastAPI backend
 │   ├── alembic/
@@ -599,9 +649,12 @@ tailadmin-vuejs-1.0.0/
 Frontend:
 
 ```powershell
+npm run test:unit
 npm run type-check
 npm run build-only
 ```
+
+Unit test realtime frontend bao phủ registry symbol, cập nhật shared price store, lifecycle/fallback của realtime manager và DNSE WebSocket service.
 
 Backend/ETL compile:
 
