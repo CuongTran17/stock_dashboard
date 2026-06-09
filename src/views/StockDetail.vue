@@ -30,13 +30,13 @@
                 class="text-2xl font-extrabold leading-none"
                 :class="selectedStock && selectedStock.changePercent >= 0 ? 'text-success-700 dark:text-success-300' : 'text-error-700 dark:text-error-300'"
               >
-                {{ formatPriceWithDecimals(selectedStock?.price || 0) }}
+                {{ currentPriceDisplay }}
               </p>
               <p
                 class="mt-2 text-sm font-semibold"
                 :class="selectedStock && selectedStock.changePercent >= 0 ? 'text-success-700 dark:text-success-300' : 'text-error-700 dark:text-error-300'"
               >
-                Biến động: {{ formatSignedChange(selectedStock?.change || 0) }} / {{ selectedStock && selectedStock.changePercent >= 0 ? '+' : '' }}{{ (selectedStock?.changePercent || 0).toFixed(2) }}%
+                Biến động: {{ currentChangeDisplay }}
               </p>
             </div>
           </div>
@@ -77,12 +77,13 @@
       </div>
 
       <div class="grid grid-cols-12 gap-4 md:gap-6">
-        <section class="col-span-12 xl:col-span-8">
+        <section v-if="hasPortfolioPositionForSymbol" class="col-span-12 xl:col-span-8">
           <PortfolioChart :symbol="symbol" :historical-data="chartHistory" />
         </section>
 
         <section
           class="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] xl:col-span-4"
+          :class="{ 'xl:col-span-12': !hasPortfolioPositionForSymbol }"
         >
           <h2 class="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">Tổng quan định giá</h2>
           <div class="space-y-3">
@@ -98,20 +99,37 @@
         </section>
 
         <section class="col-span-12">
-          <TradingViewChart :symbol="symbol" :theme="tradingViewTheme" :historical-data="historySeries">
-            <button
-              v-for="tf in CHART_TIMEFRAMES"
-              :key="tf.value"
-              class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-              :class="
-                chartTimeframe === tf.value
-                  ? 'bg-brand-500 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-              "
-              @click="chartTimeframe = tf.value"
-            >
-              {{ tf.label }}
-            </button>
+          <TradingViewChart
+            :symbol="symbol"
+            :theme="tradingViewTheme"
+            :historical-data="historySeries"
+            :chart-kind="stockDetailChartKind"
+          >
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <div class="inline-flex items-center rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
+                <button
+                  v-for="group in CHART_TIMEFRAME_GROUPS"
+                  :key="group.value"
+                  class="rounded-md px-3 py-1.5 text-xs font-semibold transition-colors"
+                  :class="chartGroupButtonClass(group.value)"
+                  @click="selectChartGroup(group.value)"
+                >
+                  {{ group.label }}
+                </button>
+              </div>
+
+              <div class="inline-flex items-center gap-1">
+                <button
+                  v-for="tf in activeChartTimeframes"
+                  :key="tf.value"
+                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                  :class="chartTimeframeButtonClass(tf.value)"
+                  @click="selectChartTimeframe(tf.value)"
+                >
+                  {{ tf.label }}
+                </button>
+              </div>
+            </div>
           </TradingViewChart>
         </section>
 
@@ -321,6 +339,8 @@ import TechnicalAnalysisChart from '@/components/stock/TechnicalAnalysisChart.vu
 import TradingViewChart from '@/components/stock/TradingViewChart.vue'
 import OrderLog from '@/components/stock/OrderLog.vue'
 import { VN30_TICKERS, useStockData } from '@/composables/useStockData'
+import { usePriceSubscription } from '@/composables/usePriceSubscription'
+import { getMyPortfolio, type PortfolioItem } from '@/services/authApi'
 import {
   stockBackendApi,
   type CompanyOverview,
@@ -330,27 +350,57 @@ import {
 } from '@/services/stockBackendApi'
 
 type FinancialType = 'income' | 'balance' | 'cashflow' | 'ratios'
+type ChartTimeframeGroup = 'minutes' | 'hours' | 'days'
+type ChartTimeframeMode = 'intraday' | 'daily'
+type ChartTimeframe = '1min' | '5min' | '15min' | '1h' | '4h' | '1d' | '1m' | '3m' | '6m' | '1y'
 
-const CHART_TIMEFRAMES = [
-  { label: '1D', value: '1d' },
-  { label: '1T', value: '1m' },
-  { label: '3T', value: '3m' },
-  { label: '6T', value: '6m' },
-  { label: '1N', value: '1y' },
-] as const
+type ChartTimeframeOption = {
+  label: string
+  value: ChartTimeframe
+  mode: ChartTimeframeMode
+  limit: number
+  intervalMinutes?: number
+}
 
-type ChartTimeframe = (typeof CHART_TIMEFRAMES)[number]['value']
+type ChartTimeframeGroupOption = {
+  label: string
+  value: ChartTimeframeGroup
+  timeframes: ChartTimeframeOption[]
+}
+
+const CHART_TIMEFRAME_GROUPS: ChartTimeframeGroupOption[] = [
+  {
+    label: 'Phút',
+    value: 'minutes',
+    timeframes: [
+      { label: '1P', value: '1min', mode: 'intraday', intervalMinutes: 1, limit: 360 },
+      { label: '5P', value: '5min', mode: 'intraday', intervalMinutes: 5, limit: 120 },
+      { label: '15P', value: '15min', mode: 'intraday', intervalMinutes: 15, limit: 96 },
+    ],
+  },
+  {
+    label: 'Giờ',
+    value: 'hours',
+    timeframes: [
+      { label: '1G', value: '1h', mode: 'intraday', intervalMinutes: 60, limit: 80 },
+      { label: '4G', value: '4h', mode: 'intraday', intervalMinutes: 240, limit: 60 },
+    ],
+  },
+  {
+    label: 'Ngày',
+    value: 'days',
+    timeframes: [
+      { label: '1D', value: '1d', mode: 'intraday', intervalMinutes: 1, limit: 360 },
+      { label: '1T', value: '1m', mode: 'daily', limit: 30 },
+      { label: '3T', value: '3m', mode: 'daily', limit: 90 },
+      { label: '6T', value: '6m', mode: 'daily', limit: 180 },
+      { label: '1N', value: '1y', mode: 'daily', limit: 365 },
+    ],
+  },
+]
 
 const ORDER_LOG_REFRESH_IN_SESSION_MS = 3000
 const ORDER_LOG_REFRESH_OUT_SESSION_MS = 15000
-
-function timeframeToLimit(tf: ChartTimeframe): number {
-  if (tf === '1d') return 2
-  if (tf === '1m') return 30
-  if (tf === '3m') return 90
-  if (tf === '6m') return 180
-  return 365
-}
 
 type HistoricalCandle = {
   time: string
@@ -367,19 +417,17 @@ const router = useRouter()
 const {
   stocks,
   fetchInitialData,
-  connectRealtime,
-  startPolling,
-  addToWatchlist,
   getTechnicalAnalysis,
-  cleanup,
 } = useStockData()
 
 const historySeries = ref<HistoricalCandle[]>([])
 const chartTimeframe = ref<ChartTimeframe>('1d')
+const activeChartGroup = ref<ChartTimeframeGroup>('days')
 const overview = ref<CompanyOverview | null>(null)
 const financialRows = ref<Record<string, unknown>[]>([])
 const googleNewsItems = ref<MarketNewsItem[]>([])
 const vnstockEvents = ref<MarketEventItem[]>([])
+const portfolioItems = ref<PortfolioItem[]>([])
 const orderTicks = ref<OrderTick[]>([])
 const orderTicksCount = ref(0)
 const orderIsInSession = ref(false)
@@ -413,7 +461,22 @@ const symbol = computed(() => {
   return String(value || 'FPT').toUpperCase()
 })
 
+usePriceSubscription('stock-detail', () => [symbol.value])
+
 const selectedStock = computed(() => stocks[symbol.value] || null)
+const hasCurrentPrice = computed(() => Boolean(
+  selectedStock.value &&
+  selectedStock.value.price > 0 &&
+  selectedStock.value.dataStatus !== 'NO_DATA_IN_SNAPSHOT',
+))
+const currentPriceDisplay = computed(() => (
+  hasCurrentPrice.value ? formatPriceWithDecimals(selectedStock.value?.price || 0) : '--'
+))
+const currentChangeDisplay = computed(() => {
+  if (!hasCurrentPrice.value) return '--'
+  const stock = selectedStock.value
+  return `${formatSignedChange(stock?.change || 0)} / ${(stock?.changePercent || 0) >= 0 ? '+' : ''}${(stock?.changePercent || 0).toFixed(2)}%`
+})
 const tradingViewTheme = computed<'light' | 'dark'>(() => (
   document.documentElement.classList.contains('dark') ? 'dark' : 'light'
 ))
@@ -436,6 +499,29 @@ const chartHistory = computed(() => historySeries.value.map((item) => ({
   time: item.time,
   close: item.close,
 })))
+
+const hasPortfolioPositionForSymbol = computed(() =>
+  portfolioItems.value.some((item) => item.symbol === symbol.value && item.quantity > 0),
+)
+
+const activeChartGroupConfig = computed(() => (
+  CHART_TIMEFRAME_GROUPS.find((group) => group.value === activeChartGroup.value) || CHART_TIMEFRAME_GROUPS[2]
+))
+
+const activeChartTimeframes = computed(() => activeChartGroupConfig.value.timeframes)
+
+const selectedChartTimeframe = computed(() => {
+  for (const group of CHART_TIMEFRAME_GROUPS) {
+    const found = group.timeframes.find((item) => item.value === chartTimeframe.value)
+    if (found) return found
+  }
+
+  return CHART_TIMEFRAME_GROUPS[2].timeframes[0]
+})
+
+const stockDetailChartKind = computed<'candlestick' | 'line'>(() => (
+  activeChartGroup.value === 'minutes' ? 'line' : 'candlestick'
+))
 
 const valuationCards = computed(() => [
   { label: 'P/E', value: formatMetric(readNumber(overview.value, ['pe', 'p_e', 'pe_ratio', 'pe_ttm'])) },
@@ -584,6 +670,34 @@ function reportTypeButtonClass(type: FinancialType): string {
   return 'bg-violet-100 text-violet-800 shadow-theme-xs dark:bg-violet-500/20 dark:text-violet-300'
 }
 
+function chartGroupButtonClass(group: ChartTimeframeGroup): string {
+  if (activeChartGroup.value === group) {
+    return 'bg-white text-brand-700 shadow-theme-xs dark:bg-gray-900 dark:text-brand-300'
+  }
+
+  return 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+}
+
+function chartTimeframeButtonClass(timeframe: ChartTimeframe): string {
+  if (chartTimeframe.value === timeframe) {
+    return 'bg-brand-500 text-white'
+  }
+
+  return 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+}
+
+function selectChartGroup(group: ChartTimeframeGroup): void {
+  activeChartGroup.value = group
+  const firstTimeframe = activeChartGroupConfig.value.timeframes[0]
+  if (firstTimeframe) {
+    chartTimeframe.value = firstTimeframe.value
+  }
+}
+
+function selectChartTimeframe(timeframe: ChartTimeframe): void {
+  chartTimeframe.value = timeframe
+}
+
 function cellValueClass(value: unknown, column: string, columnIndex: number): string {
   if (columnIndex === 0) {
     return 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
@@ -649,11 +763,20 @@ async function loadNewsAndEvents(forceRefresh: boolean = false): Promise<void> {
   }
 }
 
+async function loadPortfolio(): Promise<void> {
+  try {
+    const response = await getMyPortfolio()
+    portfolioItems.value = response.items
+  } catch {
+    portfolioItems.value = []
+  }
+}
+
 async function loadDailyHistory(
   forceRefresh: boolean = false,
   limitOverride?: number,
 ): Promise<boolean> {
-  const limit = limitOverride ?? timeframeToLimit(chartTimeframe.value)
+  const limit = limitOverride ?? selectedChartTimeframe.value.limit
 
   try {
     const response = await stockBackendApi.getHistory(symbol.value, undefined, undefined, limit, forceRefresh)
@@ -669,6 +792,7 @@ async function loadDailyHistory(
       close: item.close,
       volume: item.volume,
     }))
+    syncPriceCardFromHistory(historySeries.value)
     return true
   } catch {
     return false
@@ -676,12 +800,15 @@ async function loadDailyHistory(
 }
 
 async function loadIntradayHistory(forceRefresh: boolean = false): Promise<boolean> {
+  const timeframe = selectedChartTimeframe.value
+
   try {
     const response = await stockBackendApi.getIntraday(
       symbol.value,
-      360,
+      timeframe.limit,
       forceRefresh,
       forceRefresh,
+      timeframe.intervalMinutes || 1,
     )
 
     if (response.data.length === 0) {
@@ -696,6 +823,7 @@ async function loadIntradayHistory(forceRefresh: boolean = false): Promise<boole
       close: item.close,
       volume: item.volume,
     }))
+    syncPriceCardFromHistory(historySeries.value)
     return true
   } catch {
     return false
@@ -749,6 +877,55 @@ function parseTickTimestamp(isoTime: string): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function currentSnapshotHasUsablePrice(): boolean {
+  const current = stocks[symbol.value]
+  return Boolean(current && current.price > 0 && current.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
+}
+
+function syncPriceCardFromHistory(candles: HistoricalCandle[]): void {
+  if (currentSnapshotHasUsablePrice()) {
+    return
+  }
+
+  const latest = candles[candles.length - 1]
+  if (!latest || !Number.isFinite(latest.close) || latest.close <= 0) {
+    return
+  }
+
+  const symbolKey = symbol.value
+  const current = stocks[symbolKey]
+  const previous = candles.length > 1 ? candles[candles.length - 2] : latest
+  const refPrice = Number.isFinite(previous.close) && previous.close > 0
+    ? previous.close
+    : (Number.isFinite(latest.open) && latest.open > 0 ? latest.open : latest.close)
+  const change = latest.close - refPrice
+  const changePercent = refPrice > 0 ? (change / refPrice) * 100 : 0
+
+  stocks[symbolKey] = {
+    ...(current || {
+      symbol: symbolKey,
+      companyName: symbolKey,
+      logoColor: '#465FFF',
+      syncedAt: null,
+    }),
+    symbol: symbolKey,
+    companyName: current?.companyName || displayName.value || symbolKey,
+    price: latest.close,
+    change,
+    changePercent,
+    volume: latest.volume,
+    high: latest.high,
+    low: latest.low,
+    open: latest.open,
+    refPrice,
+    lastUpdate: latest.time,
+    syncedAt: latest.time,
+    priceSource: 'eod_snapshot',
+    dataStatus: 'DATA_AVAILABLE',
+    logoColor: current?.logoColor || '#465FFF',
+  }
+}
+
 function syncPriceCardFromLatestTick(ticks: OrderTick[]): void {
   const latestTick = ticks[0]
   const symbolKey = symbol.value
@@ -778,6 +955,8 @@ function syncPriceCardFromLatestTick(ticks: OrderTick[]): void {
     change,
     changePercent,
     lastUpdate: latestTick.time,
+    priceSource: 'dnse_live',
+    dataStatus: 'DATA_AVAILABLE',
   }
 }
 
@@ -804,16 +983,22 @@ function scheduleOrderLogAutoRefresh(): void {
 }
 
 async function loadHistory(forceRefresh: boolean = false): Promise<void> {
-  if (chartTimeframe.value === '1d') {
+  const timeframe = selectedChartTimeframe.value
+
+  if (timeframe.mode === 'intraday') {
     const intradayLoaded = await loadIntradayHistory(forceRefresh)
     if (intradayLoaded) {
       return
     }
 
-    const fallbackLoaded = await loadDailyHistory(forceRefresh, 3)
-    if (!fallbackLoaded) {
-      historySeries.value = []
+    if (timeframe.value === '1d') {
+      const fallbackLoaded = await loadDailyHistory(forceRefresh, 3)
+      if (fallbackLoaded) {
+        return
+      }
     }
+
+    historySeries.value = []
     return
   }
 
@@ -824,8 +1009,6 @@ async function loadHistory(forceRefresh: boolean = false): Promise<void> {
 }
 
 async function reloadSymbolData(forceRefresh: boolean = false): Promise<void> {
-  addToWatchlist(symbol.value)
-
   await Promise.all([
     loadOverview(forceRefresh),
     loadFinancials(forceRefresh),
@@ -903,21 +1086,15 @@ watch(chartTimeframe, () => {
 })
 
 onMounted(async () => {
-  await fetchInitialData()
+  await Promise.all([fetchInitialData(), loadPortfolio()])
   await reloadSymbolData()
   scheduleOrderLogAutoRefresh()
 
-  try {
-    connectRealtime()
-  } catch {
-    startPolling(5000)
-  }
 })
 
 onUnmounted(() => {
   stopPriceFlash()
   stopOrderLogAutoRefresh()
-  cleanup()
 })
 </script>
 

@@ -1,8 +1,8 @@
 <template>
   <div
-    class="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] sm:p-6"
+    class="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]"
   >
-    <h3 class="text-lg font-semibold text-gray-800 dark:text-white/90 mb-5">
+    <h3 class="mb-5 text-lg font-semibold text-gray-800 dark:text-white/90">
       Tổng quan thị trường
     </h3>
 
@@ -23,25 +23,25 @@
           <tr
             v-for="stock in stocks"
             :key="stock.symbol"
-            class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer transition-colors"
+            class="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-white/5"
             @click="$emit('select', stock.symbol)"
           >
             <td class="py-3">
               <div class="flex items-center gap-2">
                 <div
-                  class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold text-white"
                   :style="{ backgroundColor: stock.logoColor || '#465FFF' }"
                 >
                   {{ stock.symbol.substring(0, 2) }}
                 </div>
                 <div>
                   <p class="font-semibold text-gray-800 dark:text-white/90">{{ stock.symbol }}</p>
-                  <p class="text-xs text-gray-400 truncate max-w-[80px]">{{ stock.companyName }}</p>
+                  <p class="max-w-[80px] truncate text-xs text-gray-400">{{ stock.companyName }}</p>
                 </div>
               </div>
             </td>
             <td class="py-3 text-right font-medium text-gray-800 dark:text-white/90">
-              {{ formatPrice(stock.price) }}
+              {{ formatStockPrice(stock) }}
             </td>
             <td
               class="py-3 text-right font-medium"
@@ -94,6 +94,14 @@ function formatPrice(price: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(price)
+}
+
+function hasUsableSnapshotPrice(stock: StockState): boolean {
+  return stock.price > 0 && stock.dataStatus !== 'NO_DATA_IN_SNAPSHOT'
+}
+
+function formatStockPrice(stock: StockState): string {
+  return hasUsableSnapshotPrice(stock) ? formatPrice(stock.price) : '--'
 }
 
 function formatVolume(volume: number): string {

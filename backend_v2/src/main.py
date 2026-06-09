@@ -27,15 +27,18 @@ from src.api_errors import register_error_handlers
 from src.api.payment import router as payment_router
 from src.api.portfolio import router as portfolio_router
 from src.database.db import init_db
+from src.database.market_duckdb import market_repo
 from src.jobs import build_lifespan
 from src.observability import RequestIdMiddleware
 from src.routes.analysis import router as analysis_router
+from src.routes.dnse_ticks import router as dnse_ticks_router
 from src.routes.etl_status import router as etl_status_router
 from src.routes.health import router as health_router
 from src.routes.internal import router as internal_router
 from src.routes.market import router as market_router
 from src.routes.stocks import router as stocks_router
 from src.routes.websocket import router as websocket_router
+from src.services.ai_jobs import ai_job_service
 from src.settings import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -46,7 +49,7 @@ settings = get_settings()
 
 # ── Lifespan ──────────────────────────────────────────────────────────
 
-lifespan = build_lifespan(init_db=init_db)
+lifespan = build_lifespan(init_db=init_db, ai_job_repo=market_repo, ai_job_service=ai_job_service)
 
 # ── App ───────────────────────────────────────────────────────────────
 
@@ -71,6 +74,7 @@ app.include_router(portfolio_router)
 app.include_router(health_router)
 app.include_router(stocks_router)
 app.include_router(analysis_router)
+app.include_router(dnse_ticks_router)
 app.include_router(etl_status_router)
 app.include_router(market_router)
 app.include_router(internal_router)

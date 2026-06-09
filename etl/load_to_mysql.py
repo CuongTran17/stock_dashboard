@@ -110,15 +110,20 @@ def load_financial_cache(cfg: EtlConfig) -> int:
     records = []
     for symbol in cfg.symbols:
         for report_type in FUNDAMENTAL_REPORT_TYPES:
-            payload = _read_json(_raw_json_path(cfg, f"fundamental/{report_type}", symbol))
-            if isinstance(payload, list):
+            if report_type == "ratios":
+                payload = _read_json(_raw_json_path(cfg, "ratio_summary", symbol))
+                source = "etl-vnstock-ratio-summary"
+            else:
+                payload = _read_json(_raw_json_path(cfg, f"fundamental/{report_type}", symbol))
+                source = f"etl-vnstock-{report_type}"
+            if isinstance(payload, list) and payload:
                 records.append(
                     {
                         "symbol": symbol.upper(),
                         "report_type": report_type,
                         "row_count": len(payload),
                         "payload_json": _json_dumps(payload),
-                        "source": f"etl-vnstock-{report_type}",
+                        "source": source,
                     }
                 )
     if not records:

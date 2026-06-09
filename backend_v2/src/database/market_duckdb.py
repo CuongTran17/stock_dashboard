@@ -40,6 +40,30 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
 
 
+def _actual_direction(future_return_pct: float | None) -> str | None:
+    if future_return_pct is None:
+        return None
+    if future_return_pct > 0:
+        return "UP"
+    if future_return_pct < 0:
+        return "DOWN"
+    return "FLAT"
+
+
+def _prediction_is_correct(decision: str | None, future_return_pct: float | None) -> bool | None:
+    if decision is None or future_return_pct is None:
+        return None
+
+    normalized = decision.upper()
+    if normalized == "BUY":
+        return future_return_pct > 0
+    if normalized == "SELL":
+        return future_return_pct < 0
+    if normalized == "HOLD":
+        return abs(future_return_pct) <= 2
+    return None
+
+
 @dataclass(frozen=True)
 class TechnicalCacheRow:
     symbol: str
@@ -286,9 +310,15 @@ class MarketDuckDB:
         ]
 
     @staticmethod
-    def _technical_where_clause(start_date: date | None, end_date: date | None) -> tuple[str, list[Any]]:
+    def _technical_where_clause(
+        *,
+        symbol: str,
+        limit: int,
+        start_date: date | None,
+        end_date: date | None,
+    ) -> tuple[str, list[Any]]:
         clauses = ["symbol = ?", "limit_value = ?"]
-        params: list[Any] = []
+        params: list[Any] = [symbol.strip().upper(), int(limit)]
         if start_date is None:
             clauses.append("start_date IS NULL")
         else:
@@ -317,14 +347,19 @@ class MarketDuckDB:
         safe_end = _optional_date(end_date)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         payload_json = json.dumps(payload, ensure_ascii=False, default=str)
-        where_sql, date_params = self._technical_where_clause(safe_start, safe_end)
+        where_sql, where_params = self._technical_where_clause(
+            symbol=normalized,
+            limit=limit,
+            start_date=safe_start,
+            end_date=safe_end,
+        )
 
         with self.connect() as conn:
             conn.execute("BEGIN TRANSACTION")
             try:
                 conn.execute(
                     f"DELETE FROM technical_cache WHERE {where_sql}",
-                    [normalized, int(limit), *date_params],
+                    where_params,
                 )
                 conn.execute(
                     """
@@ -360,7 +395,12 @@ class MarketDuckDB:
         normalized = symbol.strip().upper()
         safe_start = _optional_date(start_date)
         safe_end = _optional_date(end_date)
-        where_sql, date_params = self._technical_where_clause(safe_start, safe_end)
+        where_sql, where_params = self._technical_where_clause(
+            symbol=normalized,
+            limit=limit,
+            start_date=safe_start,
+            end_date=safe_end,
+        )
 
         with self.connect() as conn:
             record = conn.execute(
@@ -370,7 +410,7 @@ class MarketDuckDB:
                 WHERE {where_sql}
                 LIMIT 1
                 """,
-                [normalized, int(limit), *date_params],
+                where_params,
             ).fetchone()
 
         if record is None:
@@ -765,6 +805,181 @@ class MarketDuckDB:
             ],
         }
 
+    def _calculate_prediction_outcome(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        *,
+        analysis_id: str,
+        symbol: str,
+        analysis_date: date,
+        horizon_days: int,
+        current_price: float | None,
+        decision: str | None,
+    ) -> dict[str, Any] | None:
+        entry_price = current_price
+        if entry_price is None or entry_price <= 0:
+            entry_row = conn.execute(
+                """
+                SELECT close
+                FROM daily_ohlcv
+                WHERE symbol = ? AND date <= ?
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                [symbol, analysis_date],
+            ).fetchone()
+            entry_price = float(entry_row[0]) if entry_row else None
+
+        if entry_price is None or entry_price <= 0:
+            return None
+
+        exit_row = conn.execute(
+            """
+            SELECT date, close
+            FROM daily_ohlcv
+            WHERE symbol = ? AND date > ?
+            ORDER BY date ASC
+            LIMIT 1 OFFSET ?
+            """,
+            [symbol, analysis_date, int(horizon_days) - 1],
+        ).fetchone()
+        if exit_row is None:
+            return None
+
+        exit_date = exit_row[0]
+        exit_price = float(exit_row[1])
+        future_return_pct = round(((exit_price - float(entry_price)) / float(entry_price)) * 100, 6)
+        is_correct = _prediction_is_correct(decision, future_return_pct)
+        actual_direction = _actual_direction(future_return_pct)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        conn.execute(
+            "DELETE FROM ai_prediction_outcomes WHERE analysis_id = ? AND horizon_days = ?",
+            [analysis_id, int(horizon_days)],
+        )
+        conn.execute(
+            """
+            INSERT INTO ai_prediction_outcomes
+                (analysis_id, horizon_days, entry_price, exit_date, exit_price,
+                 future_return_pct, actual_direction, is_correct, evaluated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                analysis_id,
+                int(horizon_days),
+                float(entry_price),
+                exit_date,
+                exit_price,
+                future_return_pct,
+                actual_direction,
+                is_correct,
+                now,
+            ],
+        )
+
+        return {
+            "horizon_days": int(horizon_days),
+            "entry_price": float(entry_price),
+            "exit_date": exit_date.isoformat() if exit_date else None,
+            "exit_price": exit_price,
+            "future_return_pct": future_return_pct,
+            "actual_direction": actual_direction,
+            "is_correct": is_correct,
+        }
+
+    def load_ai_analysis_history(self, symbol: str, limit: int = 24) -> list[dict[str, Any]]:
+        normalized = symbol.strip().upper()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT analysis_id, symbol, analysis_date, horizon_days, model_version, prompt_version,
+                       context_hash, request_hash, response_hash, market_feature_run_id, current_price,
+                       decision, confidence, reasoning, key_factors_json, status, error_message,
+                       created_at, completed_at
+                FROM ai_analysis_runs
+                WHERE symbol = ? AND status = 'success'
+                ORDER BY completed_at DESC NULLS LAST, created_at DESC
+                LIMIT ?
+                """,
+                [normalized, max(int(limit), 1)],
+            ).fetchall()
+
+            output: list[dict[str, Any]] = []
+            for row in rows:
+                outcome_rows = conn.execute(
+                    """
+                    SELECT horizon_days, entry_price, exit_date, exit_price, future_return_pct, actual_direction, is_correct
+                    FROM ai_prediction_outcomes
+                    WHERE analysis_id = ?
+                    ORDER BY horizon_days
+                    """,
+                    [row[0]],
+                ).fetchall()
+                payload_row = conn.execute(
+                    """
+                    SELECT raw_output, normalized_output_json
+                    FROM ai_analysis_payloads
+                    WHERE analysis_id = ?
+                    """,
+                    [row[0]],
+                ).fetchone()
+                outcomes = [
+                    {
+                        "horizon_days": int(item[0]),
+                        "entry_price": item[1],
+                        "exit_date": item[2].isoformat() if item[2] else None,
+                        "exit_price": item[3],
+                        "future_return_pct": item[4],
+                        "actual_direction": item[5],
+                        "is_correct": item[6],
+                    }
+                    for item in outcome_rows
+                ]
+                existing_horizons = {item["horizon_days"] for item in outcomes}
+                for horizon_days in (5, 7, 10):
+                    if horizon_days in existing_horizons:
+                        continue
+                    outcome = self._calculate_prediction_outcome(
+                        conn,
+                        analysis_id=row[0],
+                        symbol=row[1],
+                        analysis_date=row[2],
+                        horizon_days=horizon_days,
+                        current_price=row[10],
+                        decision=row[11],
+                    )
+                    if outcome is not None:
+                        outcomes.append(outcome)
+
+                outcomes.sort(key=lambda item: item["horizon_days"])
+                output.append(
+                    {
+                        "analysis_id": row[0],
+                        "symbol": row[1],
+                        "analysis_date": row[2].isoformat() if row[2] else None,
+                        "horizon_days": int(row[3]),
+                        "model_version": row[4],
+                        "prompt_version": row[5],
+                        "context_hash": row[6],
+                        "request_hash": row[7],
+                        "response_hash": row[8],
+                        "market_feature_run_id": row[9],
+                        "current_price": row[10],
+                        "decision": row[11],
+                        "confidence": row[12],
+                        "reasoning": row[13],
+                        "key_factors": json.loads(row[14] or "[]"),
+                        "status": row[15],
+                        "error_message": row[16],
+                        "created_at": row[17].isoformat() if row[17] else None,
+                        "completed_at": row[18].isoformat() if row[18] else None,
+                        "raw_output": payload_row[0] if payload_row else "",
+                        "normalized_output": json.loads(payload_row[1] or "{}") if payload_row else {},
+                        "outcomes": outcomes,
+                    }
+                )
+        return output
+
     def create_ai_generation_job(
         self,
         *,
@@ -846,6 +1061,25 @@ class MarketDuckDB:
             "started_at": row[9].isoformat() if row[9] else None,
             "completed_at": row[10].isoformat() if row[10] else None,
         }
+
+    def load_ai_jobs_by_status(self, status: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT job_id
+                FROM ai_generation_jobs
+                WHERE status = ?
+                ORDER BY created_at
+                """,
+                [status],
+            ).fetchall()
+
+        jobs: list[dict[str, Any]] = []
+        for (job_id,) in rows:
+            job = self.load_ai_generation_job(str(job_id))
+            if job is not None:
+                jobs.append(job)
+        return jobs
 
 
 class LazyMarketDuckDB:
@@ -1013,6 +1247,9 @@ class LazyMarketDuckDB:
     def load_ai_analysis_run(self, analysis_id: str) -> dict[str, Any] | None:
         return self._get_repo().load_ai_analysis_run(analysis_id)
 
+    def load_ai_analysis_history(self, symbol: str, limit: int = 24) -> list[dict[str, Any]]:
+        return self._get_repo().load_ai_analysis_history(symbol, limit=limit)
+
     def create_ai_generation_job(
         self,
         *,
@@ -1051,6 +1288,9 @@ class LazyMarketDuckDB:
 
     def load_ai_generation_job(self, job_id: str) -> dict[str, Any] | None:
         return self._get_repo().load_ai_generation_job(job_id)
+
+    def load_ai_jobs_by_status(self, status: str) -> list[dict[str, Any]]:
+        return self._get_repo().load_ai_jobs_by_status(status)
 
 
 market_repo = LazyMarketDuckDB()

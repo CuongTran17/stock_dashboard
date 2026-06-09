@@ -1,0 +1,2 @@
+export const DEFAULT_STOCK_SYMBOL = 'FPT'
+export const DEFAULT_STOCK_DETAIL_PATH = `/stocks/${DEFAULT_STOCK_SYMBOL}`

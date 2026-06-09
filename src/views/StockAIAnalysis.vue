@@ -312,18 +312,19 @@
                   <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision</th>
                   <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Confidence</th>
                   <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">5D Return</th>
-                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">10D Return</th>
+                  <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">7D Return</th>
                   <th class="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Status</th>
+                  <th class="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Detail</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-if="backtestRecords.length === 0">
-                  <td colspan="7" class="px-3 py-6 text-center text-sm italic text-gray-500 dark:text-gray-400">No prediction history available</td>
+                  <td colspan="8" class="px-3 py-6 text-center text-sm italic text-gray-500 dark:text-gray-400">No prediction history available</td>
                 </tr>
                 <tr
                   v-for="record in backtestRecords"
                   v-else
-                  :key="`${record.date}-${record.decision}-${record.confidence}`"
+                  :key="record.analysisId || `${record.date}-${record.decision}-${record.confidence}`"
                   class="border-t border-gray-200 dark:border-gray-700"
                 >
                   <td class="px-3 py-2 text-gray-600 dark:text-gray-300">{{ formatDateShort(record.date) }}</td>
@@ -335,8 +336,17 @@
                   </td>
                   <td class="px-3 py-2 text-gray-600 dark:text-gray-300">{{ record.confidence }}%</td>
                   <td class="px-3 py-2 text-gray-600 dark:text-gray-300">{{ formatBacktestPercent(record.return5d) }}</td>
-                  <td class="px-3 py-2 text-gray-600 dark:text-gray-300">{{ formatBacktestPercent(record.return10d) }}</td>
+                  <td class="px-3 py-2 text-gray-600 dark:text-gray-300">{{ formatBacktestPercent(record.return7d) }}</td>
                   <td class="px-3 py-2 text-gray-600 dark:text-gray-300">{{ backtestStatusLabel(record) }}</td>
+                  <td class="px-3 py-2 text-right">
+                    <button
+                      class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                      type="button"
+                      @click="openBacktestDetail(record)"
+                    >
+                      Chi tiết
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -351,6 +361,73 @@
         <div class="rounded-xl border border-gray-200 bg-white px-6 py-5 text-center shadow-theme-xl dark:border-gray-700 dark:bg-gray-800">
           <div class="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-brand-100 border-t-brand-500 dark:border-brand-900/30 dark:border-t-brand-400"></div>
           <p class="mt-3 text-sm font-medium text-gray-700 dark:text-gray-200">{{ loadingMessage }}</p>
+        </div>
+      </div>
+
+      <div
+        v-if="selectedBacktestRecord"
+        class="fixed inset-0 z-[9998] flex items-center justify-center bg-gray-900/40 px-4 py-6 backdrop-blur-[2px] dark:bg-gray-950/60"
+        @click.self="closeBacktestDetail"
+      >
+        <div class="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-700 dark:bg-gray-900">
+          <div class="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+            <div>
+              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">AI Prediction Detail</p>
+              <h3 class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                {{ selectedBacktestRecord.symbol || selectedSymbol }} · {{ formatDateShort(selectedBacktestRecord.date) }}
+              </h3>
+            </div>
+            <button
+              class="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              type="button"
+              @click="closeBacktestDetail"
+            >
+              Đóng
+            </button>
+          </div>
+
+          <div class="space-y-4 p-5">
+            <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Decision</p>
+                <p class="mt-2">
+                  <span class="inline-flex rounded-md px-2 py-1 text-sm font-semibold" :class="decisionTagClass(selectedBacktestRecord.decision)">
+                    {{ selectedBacktestRecord.decision }}
+                  </span>
+                </p>
+              </div>
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Confidence</p>
+                <p class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">{{ selectedBacktestRecord.confidence }}%</p>
+              </div>
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">5D Return</p>
+                <p class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">{{ formatBacktestPercent(selectedBacktestRecord.return5d) }}</p>
+              </div>
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/60">
+                <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">7D Return</p>
+                <p class="mt-2 text-lg font-semibold text-gray-900 dark:text-white">{{ formatBacktestPercent(selectedBacktestRecord.return7d) }}</p>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Lời giải thích</p>
+              <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-700 dark:text-gray-300">{{ selectedBacktestRecord.reasoning || 'Chưa có lời giải thích được lưu.' }}</p>
+            </div>
+
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Yếu tố chính</p>
+              <ul v-if="selectedBacktestRecord.keyFactors.length > 0" class="mt-2 list-disc space-y-1 pl-5 text-sm text-gray-700 dark:text-gray-300">
+                <li v-for="factor in selectedBacktestRecord.keyFactors" :key="factor">{{ factor }}</li>
+              </ul>
+              <p v-else class="mt-2 text-sm italic text-gray-500 dark:text-gray-400">Chưa có yếu tố chính được lưu.</p>
+            </div>
+
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+              <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Chi tiết phân tích</p>
+              <pre class="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-gray-700 dark:text-gray-300">{{ selectedBacktestRecord.rawOutput || selectedBacktestRecord.reasoning || 'Chưa có nội dung phân tích chi tiết.' }}</pre>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -387,16 +464,23 @@ import { VN30_TICKERS } from '@/composables/useStockData'
 import {
   stockBackendApi,
   type AiAnalysisResponse,
+  type AiAnalysisHistoryItem,
   type HistoricalRecord,
   type MarketEventItem,
   type MarketNewsItem,
   type StockSnapshot,
   type TechnicalResponse,
 } from '@/services/stockBackendApi'
+import {
+  DECISION_ORDER,
+  MODEL_LABELS,
+  NEGATIVE_TOKENS,
+  POSITIVE_TOKENS,
+  type Decision,
+} from '@/constants/stockAiAnalysis'
 
 type ViewMode = 'dashboard' | 'ai-analysis'
 type AnalysisTab = 'full' | 'technical' | 'fundamental' | 'sentiment' | 'conclusion'
-type Decision = 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell'
 type AppStatus = 'connected' | 'disconnected' | 'analyzing'
 type AlertType = 'success' | 'error' | 'info'
 
@@ -415,13 +499,18 @@ interface GeneratedAnalysis {
 }
 
 interface BacktestRecord {
+  analysisId: string
+  symbol: string
   date: string
   model: string
   decision: Decision
   confidence: number
   return5d: number | null
-  return10d: number | null
+  return7d: number | null
   accurate: boolean | null
+  reasoning: string
+  keyFactors: string[]
+  rawOutput: string
 }
 
 interface SignalDistributionRow {
@@ -448,36 +537,6 @@ function normalizeBackendUrl(rawUrl?: string): string {
 }
 
 const BACKEND_FALLBACK = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL)
-const POSITIVE_TOKENS = [
-  'tang',
-  'tich cuc',
-  'vuot ke hoach',
-  'mua',
-  'breakout',
-  'mo rong',
-  'ky luc',
-  'lai',
-  'profit',
-  'growth',
-  'upgrade',
-  'dividend',
-  'co tuc',
-]
-const NEGATIVE_TOKENS = [
-  'giam',
-  'rui ro',
-  'ban',
-  'ap luc',
-  'thua lo',
-  'dieu tra',
-  'downgrade',
-  'warning',
-  'sell',
-  'bearish',
-  'suy yeu',
-  'volatility spike',
-]
-const DECISION_ORDER: Decision[] = ['Strong Buy', 'Buy', 'Hold', 'Sell', 'Strong Sell']
 
 const currentView = ref<ViewMode>('dashboard')
 const activeTab = ref<AnalysisTab>('full')
@@ -496,6 +555,7 @@ const newsItems = ref<MarketNewsItem[]>([])
 const eventItems = ref<MarketEventItem[]>([])
 const overview = ref<Record<string, unknown> | null>(null)
 const backtestRecords = ref<BacktestRecord[]>([])
+const selectedBacktestRecord = ref<BacktestRecord | null>(null)
 
 const analysis = ref<GeneratedAnalysis>(createEmptyAnalysis())
 
@@ -529,7 +589,9 @@ const closeSeries = computed(() =>
 )
 
 const currentPrice = computed<number | null>(() => {
-  const fromSnapshot = snapshot.value ? toNumber(snapshot.value.price) : Number.NaN
+  const fromSnapshot = snapshot.value && hasUsableSnapshotPrice(snapshot.value)
+    ? toNumber(snapshot.value.price)
+    : Number.NaN
   if (Number.isFinite(fromSnapshot) && fromSnapshot > 0) {
     return fromSnapshot
   }
@@ -544,7 +606,9 @@ const previousClose = computed<number | null>(() => {
 })
 
 const currentChangePercent = computed<number | null>(() => {
-  const fromSnapshot = snapshot.value ? toNumber(snapshot.value.changePercent) : Number.NaN
+  const fromSnapshot = snapshot.value && hasUsableSnapshotPrice(snapshot.value)
+    ? toNumber(snapshot.value.changePercent)
+    : Number.NaN
   if (Number.isFinite(fromSnapshot)) {
     return fromSnapshot
   }
@@ -557,7 +621,9 @@ const currentChangePercent = computed<number | null>(() => {
 })
 
 const currentVolume = computed<number | null>(() => {
-  const fromSnapshot = snapshot.value ? toNumber(snapshot.value.volume) : Number.NaN
+  const fromSnapshot = snapshot.value && hasUsableSnapshotPrice(snapshot.value)
+    ? toNumber(snapshot.value.volume)
+    : Number.NaN
   if (Number.isFinite(fromSnapshot) && fromSnapshot >= 0) {
     return fromSnapshot
   }
@@ -717,7 +783,7 @@ function createEmptyAnalysis(): GeneratedAnalysis {
   return {
     decision: 'Hold',
     confidence: 0,
-    model: 'VN30 Analyst AI',
+    model: MODEL_LABELS.primary,
     full: '',
     technical: '',
     fundamental: '',
@@ -740,6 +806,10 @@ function toNumber(value: unknown, fallback: number = Number.NaN): number {
   }
 
   return fallback
+}
+
+function hasUsableSnapshotPrice(item: { price?: number; dataStatus?: string } | null | undefined): boolean {
+  return Boolean(item && Number(item.price) > 0 && item.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -889,10 +959,10 @@ function normalizeConfidencePercent(value: unknown, fallback: number): number {
   }
 
   if (numeric >= 0 && numeric <= 1) {
-    return numeric * 100
+    return Math.round(numeric * 100)
   }
 
-  return numeric
+  return Math.round(numeric)
 }
 
 function buildKaggleFullBullets(rawText: string, decision: string, confidence: number, keyFactors: string[]): string {
@@ -1100,6 +1170,56 @@ function decisionTagClass(decision: Decision): string {
 function backtestStatusLabel(record: BacktestRecord): string {
   if (record.accurate === null) return 'Pending'
   return record.accurate ? 'Correct' : 'Incorrect'
+}
+
+function normalizeBackendDecision(value: string | null | undefined): Decision {
+  const normalized = String(value || '').toUpperCase()
+  if (normalized === 'BUY') return 'Buy'
+  if (normalized === 'SELL') return 'Sell'
+  return 'Hold'
+}
+
+function buildSavedAnalysisRecords(records: AiAnalysisHistoryItem[]): BacktestRecord[] {
+  return records.map((record) => {
+    const outcome5d = record.outcomes.find((outcome) => outcome.horizon_days === 5)
+    const outcome7d = record.outcomes.find((outcome) => outcome.horizon_days === 7)
+
+    return {
+      analysisId: record.analysis_id,
+      symbol: record.symbol,
+      date: record.completed_at || record.created_at || record.analysis_date || '',
+      model: record.model_version || MODEL_LABELS.primary,
+      decision: normalizeBackendDecision(record.decision),
+      confidence: normalizeConfidencePercent(record.confidence ?? 0, 50),
+      return5d: outcome5d?.future_return_pct ?? null,
+      return7d: outcome7d?.future_return_pct ?? null,
+      accurate: outcome5d?.is_correct ?? null,
+      reasoning: record.reasoning || '',
+      keyFactors: record.key_factors || [],
+      rawOutput: record.raw_output || '',
+    }
+  })
+}
+
+async function loadBacktestRecordsFromSavedAnalysis(symbol: string): Promise<BacktestRecord[]> {
+  try {
+    const analysisHistory = await stockBackendApi.getAnalysisHistory(symbol, 24)
+    if (analysisHistory.data.length > 0) {
+      return buildSavedAnalysisRecords(analysisHistory.data)
+    }
+  } catch (error) {
+    console.warn('Could not load saved AI analysis history:', error)
+  }
+
+  return buildBacktestRecords()
+}
+
+function openBacktestDetail(record: BacktestRecord): void {
+  selectedBacktestRecord.value = record
+}
+
+function closeBacktestDetail(): void {
+  selectedBacktestRecord.value = null
 }
 
 function evaluatePrediction(decision: Decision, return5d: number | null): boolean | null {
@@ -1354,7 +1474,7 @@ function buildAnalysis(): GeneratedAnalysis {
   return {
     decision,
     confidence,
-    model: 'VN30 Analyst AI (rule-based)',
+    model: MODEL_LABELS.ruleBased,
     full,
     technical: technicalLines.join('\n'),
     fundamental: fundamentalLines.join('\n'),
@@ -1408,17 +1528,22 @@ function buildBacktestRecords(): BacktestRecord[] {
     const decision = scoreToDecision(score)
 
     const return5d = ((closes[index + 5] - currentClose) / currentClose) * 100
-    const return10d = ((closes[index + 10] - currentClose) / currentClose) * 100
+    const return7d = ((closes[index + 7] - currentClose) / currentClose) * 100
     const confidence = clamp(Math.round(42 + Math.abs(score) * 12 + Math.min(20, Math.abs(momentum) * 2)), 35, 94)
 
     records.push({
+      analysisId: '',
+      symbol: selectedSymbol.value,
       date: parsedRows[index].date,
-      model: 'VN30 Analyst AI',
+      model: MODEL_LABELS.primary,
       decision,
       confidence,
       return5d,
-      return10d,
+      return7d,
       accurate: evaluatePrediction(decision, return5d),
+      reasoning: 'Bản ghi backtest cục bộ được tính từ tín hiệu kỹ thuật khi chưa có lịch sử AI đã lưu.',
+      keyFactors: ['RSI', 'SMA20', 'Momentum'],
+      rawOutput: '',
     })
   }
 
@@ -1616,7 +1741,7 @@ async function refreshAll(forceRefresh: boolean = true, notify: boolean = true):
   try {
     const symbol = selectedSymbol.value
 
-    const [snapshotResult, historyResult, technicalResult, newsResult, eventsResult, overviewResult] =
+    const [snapshotResult, historyResult, technicalResult, newsResult, eventsResult, overviewResult, analysisHistoryResult] =
       await Promise.allSettled([
         stockBackendApi.getSnapshots([symbol], forceRefresh),
         stockBackendApi.getHistory(symbol, undefined, undefined, 320, forceRefresh),
@@ -1624,6 +1749,7 @@ async function refreshAll(forceRefresh: boolean = true, notify: boolean = true):
         stockBackendApi.getMarketNews([symbol], 12, forceRefresh),
         stockBackendApi.getMarketEvents([symbol], 12, forceRefresh),
         stockBackendApi.getCompanyOverview(symbol, forceRefresh),
+        stockBackendApi.getAnalysisHistory(symbol, 24),
       ])
 
     if (snapshotResult.status === 'fulfilled') {
@@ -1641,7 +1767,9 @@ async function refreshAll(forceRefresh: boolean = true, notify: boolean = true):
     eventItems.value = eventsResult.status === 'fulfilled' ? eventsResult.value.data : []
     overview.value = overviewResult.status === 'fulfilled' ? overviewResult.value : null
 
-    backtestRecords.value = buildBacktestRecords()
+    backtestRecords.value = analysisHistoryResult.status === 'fulfilled' && analysisHistoryResult.value.data.length > 0
+      ? buildSavedAnalysisRecords(analysisHistoryResult.value.data)
+      : buildBacktestRecords()
 
     await nextTick()
     refreshChart()
@@ -1742,7 +1870,7 @@ async function generateAnalysis(notify: boolean): Promise<void> {
       handleAnalysisJobFailure(message)
     }
     
-    backtestRecords.value = buildBacktestRecords()
+    backtestRecords.value = await loadBacktestRecordsFromSavedAnalysis(selectedSymbol.value)
 
     if (notify) {
       showAlert(`Đã tạo báo cáo AI cho ${selectedSymbol.value}.`, 'success')
@@ -1753,9 +1881,9 @@ async function generateAnalysis(notify: boolean): Promise<void> {
   }
 }
 
-function rebuildBacktest(): void {
-  backtestRecords.value = buildBacktestRecords()
-  showAlert('Đã tính lại backtest từ dữ liệu lịch sử.', 'info')
+async function rebuildBacktest(): Promise<void> {
+  backtestRecords.value = await loadBacktestRecordsFromSavedAnalysis(selectedSymbol.value)
+  showAlert('Đã tải lại lịch sử phân tích AI.', 'info')
 }
 
 async function onSymbolChange(): Promise<void> {

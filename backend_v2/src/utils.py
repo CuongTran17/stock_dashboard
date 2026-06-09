@@ -274,6 +274,10 @@ def _select_latest_financial_record(records: list[dict[str, Any]]) -> Optional[d
         return None
 
     def _row_sort_key(row: dict[str, Any]) -> tuple[int, int]:
+        period = str(row.get("period") or "")
+        if "-Q" in period:
+            year_text, quarter_text = period.split("-Q", 1)
+            return (_to_int(year_text), _to_int(quarter_text.split("_", 1)[0]))
         return (
             _to_int(row.get("yearReport") or row.get("year") or row.get("Year")),
             _to_int(row.get("lengthReport") or row.get("quarter") or row.get("Quarter")),
@@ -306,12 +310,12 @@ def _extract_valuation_from_ratios(records: list[dict[str, Any]]) -> dict[str, O
         }
 
     return {
-        "pe": _extract_metric(row, ["p/e", " pe"]),
-        "pb": _extract_metric(row, ["p/b", " pb"]),
-        "eps": _extract_metric(row, ["eps"]),
-        "roe": _extract_metric(row, ["roe"]),
-        "roa": _extract_metric(row, ["roa"]),
-        "market_cap": _extract_metric(row, ["market capital", "market cap"]),
+        "pe": _to_number_or_none(row.get("pe")) or _extract_metric(row, ["p/e", " pe", "pe_ratio"]),
+        "pb": _to_number_or_none(row.get("pb")) or _extract_metric(row, ["p/b", " pb", "pb_ratio"]),
+        "eps": _to_number_or_none(row.get("eps")) or _extract_metric(row, ["eps", "trailing_eps"]),
+        "roe": _to_number_or_none(row.get("roe")) or _extract_metric(row, ["roe"]),
+        "roa": _to_number_or_none(row.get("roa")) or _extract_metric(row, ["roa"]),
+        "market_cap": _to_number_or_none(row.get("market_cap")) or _extract_metric(row, ["market capital", "market cap"]),
     }
 
 

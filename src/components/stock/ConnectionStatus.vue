@@ -25,7 +25,7 @@ const props = defineProps<{
 }>()
 
 const now = ref(Date.now())
-let staleTimer: ReturnType<typeof window.setInterval> | null = null
+let staleTimer: number | null = null
 
 const isStale = computed(() => {
   if (!props.lastUpdate) return false
@@ -33,16 +33,16 @@ const isStale = computed(() => {
 })
 
 const statusLabel = computed(() => {
+  if (isStale.value) return 'Dữ liệu cũ'
   if (props.connected) return 'Trực tiếp'
-  if (props.backendAvailable && !isStale.value) return 'Polling'
-  if (props.backendAvailable) return 'Dữ liệu cũ'
+  if (props.backendAvailable) return 'Polling'
   return 'Ngoại tuyến'
 })
 
 const indicatorClass = computed(() => {
+  if (isStale.value) return 'bg-warning-500'
   if (props.connected) return 'bg-success-500 animate-pulse'
-  if (props.backendAvailable && !isStale.value) return 'bg-brand-500'
-  if (props.backendAvailable) return 'bg-warning-500'
+  if (props.backendAvailable) return 'bg-brand-500'
   return 'bg-gray-400'
 })
 

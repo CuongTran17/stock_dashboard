@@ -59,8 +59,10 @@ from etl.logging_setup import get_logger, setup_logging
 from etl.processed_files import latest_processed_parquet
 from etl.run_metadata import RunMetadata, complete_metadata, running_metadata, save_run_metadata
 from etl.transform.transform_aggregate import aggregate_all_ticks_to_eod
+from etl.backfill_dnse_ticks import backfill_dnse_ticks_for_session, backfill_latest_session_ticks
 from etl.transform.build_dataset import build_full_dataset, validate_dataset
 from etl.transform.transform_validate import enforce_publish_quality_gate
+from backend_v2.src.services.etl_marker import write_last_etl_marker
 
 log = get_logger(__name__)
 
@@ -346,6 +348,30 @@ def _run_impl(cfg: EtlConfig, metadata: RunMetadata) -> Path:
     else:
         metadata.artifacts["mysql_cache_load"] = "disabled"
 
+    if cfg.enable_dnse_tick_backfill and cfg.tick_source in {"lake", "auto"}:
+        phase_started = time.perf_counter()
+        if cfg.dnse_tick_session_date is not None:
+            backfill_result = backfill_dnse_ticks_for_session(
+                cfg.symbols,
+                cfg.dnse_tick_session_date,
+                force=cfg.force_dnse_tick_backfill,
+            )
+        else:
+            backfill_result = backfill_latest_session_ticks(
+                cfg.symbols,
+                force=cfg.force_dnse_tick_backfill,
+            )
+        _record_phase(metadata, "dnse_tick_backfill", phase_started)
+        metadata.row_counts["dnse_tick_backfilled_symbols"] = len(backfill_result.backfilled)
+        metadata.row_counts["dnse_tick_existing_symbols"] = len(backfill_result.skipped_existing)
+        metadata.row_counts["dnse_tick_empty_symbols"] = len(backfill_result.empty_from_dnse)
+        metadata.artifacts["dnse_tick_backfill_session_date"] = backfill_result.session_date.isoformat()
+        if backfill_result.failed:
+            metadata.extract_errors.update(
+                {f"dnse_tick_backfill:{symbol}": error for symbol, error in backfill_result.failed.items()}
+            )
+        save_run_metadata(metadata, cfg)
+
     if cfg.enable_tick_eod:
         eod_rows = aggregate_all_ticks_to_eod(cfg.symbols, cfg, source=cfg.tick_source)
         load_eod_rows_to_duckdb(eod_rows)
@@ -406,16 +432,37 @@ def run(cfg: EtlConfig) -> Path:
             try:
                 import pandas as pd
 
-                row_count = int(len(pd.read_parquet(parquet_path, columns=["symbol"])))
+                completed = pd.read_parquet(parquet_path, columns=["symbol", "data_date"])
+                row_count = int(len(completed))
+                latest_data_date = pd.to_datetime(completed["data_date"], errors="coerce").dropna().max()
+                data_date = str(latest_data_date.date()) if not pd.isna(latest_data_date) else str(cfg.user_end)
+                symbols = sorted(completed["symbol"].dropna().astype(str).str.upper().unique().tolist())
             except Exception:
                 row_count = 0
+                data_date = str(cfg.user_end)
+                symbols = sorted(symbol.upper() for symbol in cfg.symbols)
+        else:
+            data_date = str(cfg.user_end)
+            symbols = sorted(symbol.upper() for symbol in cfg.symbols)
         metadata.row_counts["final_rows"] = row_count
         complete_metadata(metadata, status="success", row_count=row_count, output_file=str(output))
         save_run_metadata(metadata, cfg)
+        write_last_etl_marker(
+            run_id=cfg.run_id,
+            data_date=data_date,
+            status="success",
+            symbols=symbols,
+        )
         return output
     except Exception as exc:
         complete_metadata(metadata, status="failed", errors={"run": str(exc)})
         save_run_metadata(metadata, cfg)
+        write_last_etl_marker(
+            run_id=cfg.run_id,
+            data_date="",
+            status="failed",
+            symbols=sorted(symbol.upper() for symbol in cfg.symbols),
+        )
         raise
 
 
@@ -436,7 +483,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         description="ETL pipeline: Extract -> Transform -> Load market_data.csv",
     )
     parser.add_argument("--start-date", default="2025-04-01")
-    parser.add_argument("--end-date", default="2026-04-01")
+    parser.add_argument("--end-date", default=date.today().isoformat())
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS))
     parser.add_argument("--text-mode", default="dense", choices=["dense", "raw"])
     parser.add_argument("--output", default="market_data.csv")
@@ -485,6 +532,18 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Source for tick -> EOD aggregation",
     )
     parser.add_argument(
+        "--disable-dnse-tick-backfill", action="store_true", default=False,
+        help="Skip DNSE historical tick backfill before tick -> EOD aggregation",
+    )
+    parser.add_argument(
+        "--dnse-tick-session-date", default=None,
+        help="Backfill this explicit DNSE tick session date instead of the latest completed session",
+    )
+    parser.add_argument(
+        "--force-dnse-tick-backfill", action="store_true", default=False,
+        help="Refetch and overwrite existing DNSE tick Parquet files",
+    )
+    parser.add_argument(
         "--run-mode", default="full", choices=["full", "incremental", "backfill"],
         help="Run strategy. incremental resolves start date from the latest processed snapshot; backfill merges a specified range into the latest snapshot.",
     )
@@ -526,6 +585,9 @@ def main() -> None:
         enable_market_duckdb_load=not args.disable_duckdb_market_load,
         enable_tick_eod=not args.disable_tick_eod,
         tick_source=args.tick_source,
+        enable_dnse_tick_backfill=not args.disable_dnse_tick_backfill,
+        dnse_tick_session_date=args.dnse_tick_session_date,
+        force_dnse_tick_backfill=args.force_dnse_tick_backfill,
         run_mode=args.run_mode,
         incremental_overlap_days=args.incremental_overlap_days,
         merge_with_latest=not args.no_merge_with_latest,

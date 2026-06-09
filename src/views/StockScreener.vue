@@ -161,6 +161,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminLayout from '@/components/layout/AdminLayout.vue'
 import { VN30_TICKERS, useStockData } from '@/composables/useStockData'
+import { usePriceSubscription } from '@/composables/usePriceSubscription'
 import { stockBackendApi, type CompanyOverview, type TradingSignals } from '@/services/stockBackendApi'
 
 interface ScreenerRow {
@@ -180,6 +181,7 @@ const router = useRouter()
 const { stocks, fetchInitialData } = useStockData()
 
 const rows = ref<ScreenerRow[]>([])
+usePriceSubscription('stock-screener', () => rows.value.map((row) => row.symbol))
 const loading = ref(false)
 
 const searchKeyword = ref('')
@@ -193,6 +195,12 @@ const filteredRows = computed(() => {
   const keyword = searchKeyword.value.trim().toLowerCase()
 
   return rows.value
+    .map((row) => {
+      const live = stocks[row.symbol]
+      return live
+        ? { ...row, price: live.price, changePercent: live.changePercent }
+        : row
+    })
     .filter((row) => {
       const keywordMatch =
         keyword.length === 0 ||
@@ -273,6 +281,10 @@ function formatSignalSummary(value: ScreenerRow['signalSummary']): string {
   return map[value] ?? value
 }
 
+function hasUsableSnapshotPrice(item: { price?: number; dataStatus?: string } | null | undefined): boolean {
+  return Boolean(item && Number(item.price) > 0 && item.dataStatus !== 'NO_DATA_IN_SNAPSHOT')
+}
+
 function goToDetail(symbol: string): void {
   void router.push(`/stocks/${symbol}`)
 }
@@ -323,8 +335,9 @@ async function buildRow(symbol: string): Promise<ScreenerRow | null> {
     base?.companyName ||
     upperSymbol
 
-  const price = base?.price || readNumber(overview, ['last_price', 'price']) || 0
-  const changePercent = base?.changePercent || 0
+  const baseHasPrice = hasUsableSnapshotPrice(base)
+  const price = baseHasPrice ? base.price : readNumber(overview, ['last_price', 'price']) || 0
+  const changePercent = baseHasPrice ? base.changePercent : 0
 
   if (price <= 0 && technicalRsi === null) {
     return null

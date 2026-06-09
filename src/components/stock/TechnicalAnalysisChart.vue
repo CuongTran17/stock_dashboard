@@ -115,6 +115,8 @@ const props = defineProps<{
   symbol: string
   fetchTechnical: (symbol: string, limit: number) => Promise<TechnicalResponse | null>
   refreshToken?: number
+  valueUnit?: string
+  yAxisTitle?: string
 }>()
 
 const periodOptions = [
@@ -129,6 +131,8 @@ const taData = ref<TechnicalResponse | null>(null)
 
 const signals = computed(() => taData.value?.signals || null)
 const hasData = computed(() => taData.value !== null && taData.value.count > 0)
+const valueUnit = computed(() => props.valueUnit ?? 'đ')
+const yAxisTitle = computed(() => props.yAxisTitle ?? 'Giá (VNĐ)')
 
 const signalLabel = computed(() => {
   const map: Record<string, string> = {
@@ -199,7 +203,7 @@ const priceChartOptions = computed(() => ({
         val != null ? new Intl.NumberFormat('vi-VN', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
-        }).format(val) + ' đ' : '-',
+        }).format(val) + ` ${valueUnit.value}` : '-',
     },
   },
   xaxis: {
@@ -210,7 +214,7 @@ const priceChartOptions = computed(() => ({
     tooltip: { enabled: false },
   },
   yaxis: {
-    title: { text: 'Giá (VNĐ)', style: { fontSize: '11px' } },
+    title: { text: yAxisTitle.value, style: { fontSize: '11px' } },
     labels: {
       formatter: (val: number) => new Intl.NumberFormat('vi-VN', {
         minimumFractionDigits: 2,

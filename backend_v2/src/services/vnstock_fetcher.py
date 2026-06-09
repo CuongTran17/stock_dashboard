@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import date, datetime, time as dt_time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -86,6 +87,34 @@ def _to_int(value: Any, fallback: int = 0) -> int:
         return fallback
 
 
+def _canonical_match_type(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"buy", "b", "mua"}:
+        return "buy"
+    if normalized in {"sell", "s", "ban", "bán"}:
+        return "sell"
+    if normalized in {"ato", "atc", "lo"}:
+        return normalized
+    return "unknown"
+
+
+def _infer_match_type(
+    current_price: float,
+    previous_price: float | None,
+    source_match_type: Any,
+) -> tuple[str, str, str]:
+    canonical = _canonical_match_type(source_match_type)
+    if canonical in {"buy", "sell", "ato", "atc", "lo"}:
+        return canonical, "dnse", "source"
+    if previous_price is None or previous_price <= 0:
+        return "unknown", "price_tick", "unknown"
+    if current_price > previous_price:
+        return "buy", "price_tick", "inferred"
+    if current_price < previous_price:
+        return "sell", "price_tick", "inferred"
+    return "unknown", "price_tick", "unknown"
+
+
 def _to_iso_time(value: Any) -> str:
     if isinstance(value, pd.Timestamp):
         dt = value.to_pydatetime()
@@ -137,6 +166,8 @@ def _empty_snapshot(symbol: str) -> Dict[str, Any]:
         "refPrice": 0.0,
         "lastUpdate": now_iso,
         "syncedAt": None,
+        "priceSource": "no_data",
+        "dataStatus": "NO_DATA_IN_SNAPSHOT",
     }
 
 
@@ -151,6 +182,7 @@ class VnstockFetcherService:
         self.max_ticks_per_symbol = MAX_TICKS_PER_SYMBOL
         self.default_history_lookback_days = DEFAULT_HISTORY_LOOKBACK_DAYS
         self.min_request_interval = MIN_REQUEST_INTERVAL_SECONDS
+        self.tick_parquet_flush_seconds = settings.dnse_tick_parquet_flush_seconds
 
         self.last_intraday_sync_at: Optional[str] = None
         self.last_history_sync_at: Dict[str, str] = {}
@@ -163,6 +195,9 @@ class VnstockFetcherService:
         self._cache_lock = asyncio.Lock()
         self._intraday_semaphore = asyncio.Semaphore(INTRADAY_CONCURRENCY)
         self._history_semaphore = asyncio.Semaphore(HISTORY_PRELOAD_CONCURRENCY)
+        self._tick_parquet_last_flush_at: Dict[str, float] = {}
+        self._tick_parquet_clock = time.monotonic
+        self._tick_parquet_writer = dump_ticks_to_parquet
 
         self._configure_api_key()
 
@@ -297,7 +332,9 @@ class VnstockFetcherService:
                     "time": tick_time,
                     "price": price,
                     "volume": volume,
-                    "match_type": str(raw.get("match_type") or ""),
+                    "match_type": _canonical_match_type(raw.get("match_type")),
+                    "side_source": str(raw.get("side_source") or "missing"),
+                    "side_confidence": str(raw.get("side_confidence") or "unknown"),
                 }
             )
 
@@ -352,6 +389,8 @@ class VnstockFetcherService:
             "refPrice": previous_ref,
             "lastUpdate": target_ticks[-1].get("time") or datetime.now(tz=VN_TZ).isoformat(),
             "syncedAt": datetime.now(tz=VN_TZ).isoformat(),
+            "priceSource": "dnse_live",
+            "dataStatus": "DATA_AVAILABLE",
         }
         if r:
             r.set(f"snapshot:{symbol}", json.dumps(new_snap))
@@ -577,12 +616,16 @@ class VnstockFetcherService:
         if not is_vn30_symbol(normalized):
             return []
 
-        return market_repo.load_history(
-            normalized,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-        )
+        try:
+            return market_repo.load_history(
+                normalized,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
+        except Exception:
+            logger.warning("Could not read DuckDB history for %s.", normalized, exc_info=True)
+            return []
 
     async def load_history_from_db_async(
         self,
@@ -605,6 +648,7 @@ class VnstockFetcherService:
 
     async def ingest_realtime_quotes(self, quotes: List[Dict[str, Any]]) -> int:
         saved = 0
+        parquet_flushes: Dict[str, List[Dict[str, Any]]] = {}
         async with self._cache_lock:
             r = get_redis()
             for quote in quotes:
@@ -616,22 +660,39 @@ class VnstockFetcherService:
                 if price <= 0:
                     continue
 
+                if r:
+                    snap_str = r.get(f"snapshot:{symbol}")
+                    snapshot = json.loads(snap_str) if snap_str else _empty_snapshot(symbol)
+                else:
+                    snapshot = dict(self._snapshot_mem.get(symbol, _empty_snapshot(symbol)))
+
+                previous_price = _to_float(snapshot.get("price"))
+                match_type, inferred_source, inferred_confidence = _infer_match_type(
+                    current_price=price,
+                    previous_price=previous_price,
+                    source_match_type=quote.get("match_type"),
+                )
+                side_confidence = str(quote.get("side_confidence") or inferred_confidence)
+                side_source = str(quote.get("side_source") or inferred_source)
+                if side_confidence != "source":
+                    side_confidence = inferred_confidence
+                    side_source = inferred_source
+
                 tick = {
                     "id": f"manual|{symbol}|{quote.get('time')}|{price}|{quote.get('volume')}",
                     "symbol": symbol,
                     "time": _to_iso_time(quote.get("time")),
                     "price": price,
                     "volume": _to_int(quote.get("volume")),
-                    "match_type": "manual",
+                    "match_type": match_type,
+                    "side_source": side_source,
+                    "side_confidence": side_confidence,
                 }
 
-                self._merge_ticks_no_lock(symbol, [tick])
+                merged_count = self._merge_ticks_no_lock(symbol, [tick])
+                if merged_count > 0 and self._should_flush_tick_parquet(symbol):
+                    parquet_flushes[symbol] = self._read_symbol_ticks_no_lock(symbol, r)
 
-                if r:
-                    snap_str = r.get(f"snapshot:{symbol}")
-                    snapshot = json.loads(snap_str) if snap_str else _empty_snapshot(symbol)
-                else:
-                    snapshot = dict(self._snapshot_mem.get(symbol, _empty_snapshot(symbol)))
                 snapshot["price"] = price
                 snapshot["change"] = _to_float(quote.get("change"), fallback=snapshot.get("change", 0.0))
                 snapshot["changePercent"] = _to_float(
@@ -644,6 +705,8 @@ class VnstockFetcherService:
                 snapshot["volume"] = _to_int(quote.get("volume"), fallback=snapshot.get("volume", 0))
                 snapshot["lastUpdate"] = tick["time"]
                 snapshot["syncedAt"] = datetime.now(tz=VN_TZ).isoformat()
+                snapshot["priceSource"] = "dnse_live"
+                snapshot["dataStatus"] = "DATA_AVAILABLE"
                 if _to_float(snapshot.get("refPrice")) <= 0:
                     snapshot["refPrice"] = snapshot["open"]
                 if r:
@@ -655,7 +718,25 @@ class VnstockFetcherService:
 
         if saved > 0:
             self.last_intraday_sync_at = datetime.now(tz=VN_TZ).isoformat()
+
+        for symbol, ticks in parquet_flushes.items():
+            await asyncio.to_thread(self._tick_parquet_writer, symbol, ticks)
+
         return saved
+
+    def _should_flush_tick_parquet(self, symbol: str) -> bool:
+        now = self._tick_parquet_clock()
+        last = self._tick_parquet_last_flush_at.get(symbol)
+        if last is not None and now - last < self.tick_parquet_flush_seconds:
+            return False
+        self._tick_parquet_last_flush_at[symbol] = now
+        return True
+
+    def _read_symbol_ticks_no_lock(self, symbol: str, redis_client: Any | None) -> List[Dict[str, Any]]:
+        if redis_client:
+            raw = redis_client.lrange(f"intraday:{symbol}", 0, -1)
+            return [json.loads(x) for x in raw]
+        return [dict(item) for item in self._intraday_mem.get(symbol, [])]
 
     def get_snapshot(self, symbol: str) -> Dict[str, Any]:
         normalized = normalize_symbol(symbol)
@@ -668,7 +749,10 @@ class VnstockFetcherService:
             snapshot = json.loads(snap_str) if snap_str else _empty_snapshot(normalized)
         else:
             snapshot = dict(self._snapshot_mem.get(normalized, _empty_snapshot(normalized)))
-        if _to_float(snapshot.get("price")) <= 0:
+        if _to_float(snapshot.get("price")) > 0:
+            snapshot["priceSource"] = snapshot.get("priceSource") or "dnse_last_tick"
+            snapshot["dataStatus"] = "DATA_AVAILABLE"
+        else:
             history = self.load_history_from_db(normalized, limit=2)
             if history:
                 latest = history[-1]
@@ -693,8 +777,14 @@ class VnstockFetcherService:
                         "volume": _to_int(latest.get("volume")),
                         "lastUpdate": str(latest.get("time")),
                         "syncedAt": self.last_history_sync_at.get(normalized),
+                        "priceSource": "eod_snapshot",
+                        "dataStatus": "DATA_AVAILABLE",
                     }
                 )
+
+        if _to_float(snapshot.get("price")) <= 0:
+            snapshot["priceSource"] = "no_data"
+            snapshot["dataStatus"] = "NO_DATA_IN_SNAPSHOT"
 
         return snapshot
 

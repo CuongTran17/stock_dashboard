@@ -46,6 +46,9 @@ run_daily_pipeline.bat
 # Test files (kept locally, not part of repo)
 test_*.py
 *_test.py
+!backend_v2/tests/test_dnse_market_data.py
+!backend_v2/tests/test_dnse_realtime_provider.py
+!backend_v2/tests/test_stocks_dnse_integration.py
 
 # Generated data files (run ETL pipeline to regenerate)
 market_data.csv

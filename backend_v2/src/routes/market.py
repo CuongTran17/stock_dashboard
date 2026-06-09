@@ -27,6 +27,23 @@ from src.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_GOOGLE_NEWS_MOJIBAKE_MARKERS = ("├", "┬", "ß", "╗", "║", "─", "Ī", "Ę", "Ł", "ć", "ō", "░", "┐")
+
+
+def _repair_google_news_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or not any(marker in text for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS):
+        return text
+
+    try:
+        repaired = text.encode("cp775").decode("utf-8")
+    except UnicodeError:
+        return text
+
+    original_marker_count = sum(text.count(marker) for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS)
+    repaired_marker_count = sum(repaired.count(marker) for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS)
+    return repaired if repaired_marker_count < original_marker_count else text
 REPO_ROOT = Path(__file__).resolve().parents[3]
 settings = get_settings()
 
@@ -74,6 +91,13 @@ def _normalize_market_index_symbol(symbol: str) -> str:
     )
 
 
+def _normalize_market_index_price(value: Any) -> float:
+    price = _to_float(value)
+    if 0 < abs(price) < 10:
+        return price * 1000.0
+    return price
+
+
 def _load_market_index_history_from_lake(index_symbol: str, limit: int) -> list[dict[str, Any]]:
     latest = REPO_ROOT / "lake" / "gold" / "market_features" / "latest.parquet"
     if not latest.exists():
@@ -100,7 +124,7 @@ def _load_market_index_history_from_lake(index_symbol: str, limit: int) -> list[
 
     output: list[dict[str, Any]] = []
     for raw in rows.to_dict("records"):
-        close = _to_float(raw.get(close_column))
+        close = _normalize_market_index_price(raw.get(close_column))
         volume = _to_int(raw.get(volume_column)) if volume_column in raw else 0
         output.append(
             {
@@ -147,8 +171,10 @@ def _build_market_index_quote(index_symbol: str, history_rows: list[dict[str, An
     latest = history_rows[-1]
     previous = history_rows[-2] if len(history_rows) > 1 else latest
 
-    latest_close = _to_float(latest.get("close"))
-    previous_close = _to_float(previous.get("close"), fallback=latest_close)
+    latest_close = _normalize_market_index_price(latest.get("close"))
+    previous_close = _normalize_market_index_price(previous.get("close"))
+    if previous_close <= 0:
+        previous_close = latest_close
     change = latest_close - previous_close
     change_percent = (change / previous_close * 100.0) if previous_close > 0 else 0.0
 
@@ -290,17 +316,17 @@ def _load_latest_google_news(symbol: str, limit: int) -> tuple[list[dict[str, An
         for index, item in enumerate(raw):
             if not isinstance(item, dict):
                 continue
-            title = str(item.get("title") or "").strip()
+            title = _repair_google_news_text(item.get("title"))
             if not title:
                 continue
-            published = item.get("datetime") or item.get("date") or ""
+            published = _repair_google_news_text(item.get("datetime") or item.get("date") or "")
             items.append({
                 "id": f"{symbol}-google-{path.stem}-{index}",
                 "symbol": symbol,
                 "symbols": [symbol],
-                "source": str(item.get("source") or "Google News"),
+                "source": _repair_google_news_text(item.get("source") or "Google News"),
                 "title": title,
-                "summary": str(item.get("desc") or ""),
+                "summary": _repair_google_news_text(item.get("desc")),
                 "publish_time": str(published),
                 "time": str(published),
                 "url": str(item.get("link") or ""),

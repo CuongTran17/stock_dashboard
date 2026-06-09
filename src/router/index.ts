@@ -47,6 +47,12 @@ const router = createRouter({
 
     // ── AI Analysis (Premium gated) ─────────────────────────────
     {
+      path: '/dnse-ticks',
+      name: 'DnseTickSandbox',
+      component: () => import('../views/DnseTickSandbox.vue'),
+      meta: { title: 'DNSE Tick Sandbox' },
+    },
+    {
       path: '/ai-analysis',
       name: 'StockAIAnalysis',
       component: () => import('../views/StockAIAnalysis.vue'),
@@ -128,7 +134,7 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   document.title = `${to.meta.title} | The Fin1`
 
-  const publicPaths = ['/welcome', '/signin', '/signup']
+  const publicPaths = ['/welcome', '/signin', '/signup', '/dnse-ticks']
   const isPublicRoute = publicPaths.includes(to.path)
 
   if (!isLoggedIn() && !isPublicRoute) {
