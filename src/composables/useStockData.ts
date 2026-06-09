@@ -540,6 +540,7 @@ function createStockDataStore() {
     watchlistStocks,
 
     fetchInitialData,
+    loadSymbolData,
     addToWatchlist,
     removeFromWatchlist,
     clearWatchlist,

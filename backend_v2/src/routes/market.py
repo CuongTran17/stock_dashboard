@@ -27,6 +27,23 @@ from src.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_GOOGLE_NEWS_MOJIBAKE_MARKERS = ("├", "┬", "ß", "╗", "║", "─", "Ī", "Ę", "Ł", "ć", "ō", "░", "┐")
+
+
+def _repair_google_news_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or not any(marker in text for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS):
+        return text
+
+    try:
+        repaired = text.encode("cp775").decode("utf-8")
+    except UnicodeError:
+        return text
+
+    original_marker_count = sum(text.count(marker) for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS)
+    repaired_marker_count = sum(repaired.count(marker) for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS)
+    return repaired if repaired_marker_count < original_marker_count else text
 REPO_ROOT = Path(__file__).resolve().parents[3]
 settings = get_settings()
 
@@ -299,17 +316,17 @@ def _load_latest_google_news(symbol: str, limit: int) -> tuple[list[dict[str, An
         for index, item in enumerate(raw):
             if not isinstance(item, dict):
                 continue
-            title = str(item.get("title") or "").strip()
+            title = _repair_google_news_text(item.get("title"))
             if not title:
                 continue
-            published = item.get("datetime") or item.get("date") or ""
+            published = _repair_google_news_text(item.get("datetime") or item.get("date") or "")
             items.append({
                 "id": f"{symbol}-google-{path.stem}-{index}",
                 "symbol": symbol,
                 "symbols": [symbol],
-                "source": str(item.get("source") or "Google News"),
+                "source": _repair_google_news_text(item.get("source") or "Google News"),
                 "title": title,
-                "summary": str(item.get("desc") or ""),
+                "summary": _repair_google_news_text(item.get("desc")),
                 "publish_time": str(published),
                 "time": str(published),
                 "url": str(item.get("link") or ""),

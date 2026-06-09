@@ -34,12 +34,24 @@ log = get_logger(__name__)
 # Rate limit cho Google scraping — tránh bị block
 _GOOGLE_NEWS_DELAY_SECONDS: float = 2.0
 _MAX_ARTICLES_PER_QUERY: int = 10
+_GOOGLE_NEWS_MOJIBAKE_MARKERS = ("├", "┬", "ß", "╗", "║", "─", "Ī", "Ę", "Ł", "ć", "ō", "░", "┐")
 
 
 def _safe_str(value: Any) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    text = str(value).strip()
+    if not text or not any(marker in text for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS):
+        return text
+
+    try:
+        repaired = text.encode("cp775").decode("utf-8")
+    except UnicodeError:
+        return text
+
+    original_marker_count = sum(text.count(marker) for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS)
+    repaired_marker_count = sum(repaired.count(marker) for marker in _GOOGLE_NEWS_MOJIBAKE_MARKERS)
+    return repaired if repaired_marker_count < original_marker_count else text
 
 
 def _parse_relative_date(date_str: str) -> Optional[str]:

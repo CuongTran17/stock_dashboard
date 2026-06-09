@@ -51,6 +51,20 @@ class MarketDataStatusTests(unittest.TestCase):
         self.assertIsNone(reject_refresh_in_snapshot_mode(False))
 
 
+class MarketNewsEncodingTests(unittest.TestCase):
+    def test_google_news_mojibake_repair_preserves_valid_vietnamese(self):
+        from src.routes.market import _repair_google_news_text
+
+        self.assertEqual(
+            _repair_google_news_text("Techcombank h├║t th├¬m 4.500 tß╗Ę ─æß╗ōng qua tr├Īi phiß║┐u"),
+            "Techcombank hút thêm 4.500 tỷ đồng qua trái phiếu",
+        )
+        self.assertEqual(
+            _repair_google_news_text("Techcombank hút thêm vốn qua trái phiếu"),
+            "Techcombank hút thêm vốn qua trái phiếu",
+        )
+
+
 class SmallRuntimeModeSettingsTests(unittest.TestCase):
     def test_backend_defaults_to_no_request_duckdb_writes_and_no_startup_etl(self):
         from src.settings import Settings

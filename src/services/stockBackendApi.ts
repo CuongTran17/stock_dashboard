@@ -255,6 +255,41 @@ export interface AiAnalysisResponse {
   }
 }
 
+export interface AiAnalysisHistoryItem {
+  analysis_id: string
+  symbol: string
+  analysis_date: string | null
+  horizon_days: number
+  model_version: string
+  prompt_version: string
+  current_price: number | null
+  decision: 'BUY' | 'SELL' | 'HOLD'
+  confidence: number | null
+  reasoning: string | null
+  key_factors: string[]
+  raw_output?: string | null
+  normalized_output?: Record<string, unknown>
+  status: string
+  created_at: string | null
+  completed_at: string | null
+  outcomes: {
+    horizon_days: number
+    entry_price: number | null
+    exit_date: string | null
+    exit_price: number | null
+    future_return_pct: number | null
+    actual_direction: string | null
+    is_correct: boolean | null
+  }[]
+}
+
+export interface AiAnalysisHistoryResponse {
+  symbol: string
+  count: number
+  data: AiAnalysisHistoryItem[]
+  source: string
+}
+
 export interface AiAnalysisJobResponse {
   job_id: string
   symbol: string
@@ -521,6 +556,14 @@ class StockBackendApi {
         retries: 1,
       },
     )
+  }
+
+  async getAnalysisHistory(
+    symbol: string,
+    limit: number = 24,
+  ): Promise<AiAnalysisHistoryResponse> {
+    const query = this.buildQuery({ limit })
+    return this.fetch<AiAnalysisHistoryResponse>(`/api/analysis/${symbol.toUpperCase()}/history${query}`)
   }
 }
 

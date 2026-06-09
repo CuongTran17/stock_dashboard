@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+try:
+    from src.cache import _load_financial_report_cache
+    from src.utils import _extract_valuation_from_ratios
+except ModuleNotFoundError:
+    from backend_v2.src.cache import _load_financial_report_cache
+    from backend_v2.src.utils import _extract_valuation_from_ratios
+
+
+logger = logging.getLogger(__name__)
 
 
 AI_FEATURE_COLUMNS = [
@@ -65,14 +76,71 @@ Return JSON only with this schema:
 """.strip()
 
 
+def _has_value(value: Any) -> bool:
+    return value is not None and value != ""
+
+
+async def load_cached_fundamentals(symbol: str) -> dict[str, Any]:
+    records, _ = await _load_financial_report_cache(symbol.strip().upper(), "ratios", max_age_seconds=None)
+    return _extract_valuation_from_ratios(records or [])
+
+
+async def enrich_fundamental_context(
+    symbol: str,
+    context: dict[str, Any],
+    fundamental_loader: Any,
+) -> dict[str, Any]:
+    valuation = {
+        "pe": context.get("micro_pe"),
+        "pb": context.get("micro_pb"),
+        "eps": context.get("micro_eps"),
+        "roe": context.get("micro_roe"),
+        "roa": context.get("micro_roa"),
+        "market_cap": context.get("micro_market_cap"),
+    }
+    missing_core_metrics = not all(_has_value(valuation.get(key)) for key in ("pe", "pb", "eps", "roe", "roa"))
+
+    if missing_core_metrics and fundamental_loader is not None:
+        try:
+            cached = await fundamental_loader(symbol.strip().upper())
+            if isinstance(cached, dict):
+                for key in ("pe", "pb", "eps", "roe", "roa", "market_cap"):
+                    if not _has_value(valuation.get(key)) and _has_value(cached.get(key)):
+                        valuation[key] = cached[key]
+        except Exception as exc:
+            logger.warning("Could not enrich AI fundamentals for %s: %s", symbol, exc)
+
+    context["micro_pe"] = valuation.get("pe")
+    context["micro_pb"] = valuation.get("pb")
+    context["micro_eps"] = valuation.get("eps")
+    context["micro_roe"] = valuation.get("roe")
+    context["micro_roa"] = valuation.get("roa")
+    context["fundamentals"] = {
+        key: value
+        for key, value in {
+            "pe": valuation.get("pe"),
+            "pb": valuation.get("pb"),
+            "eps": valuation.get("eps"),
+            "roe": valuation.get("roe"),
+            "roa": valuation.get("roa"),
+            "market_cap": valuation.get("market_cap"),
+            "revenue_growth": context.get("fund_revenue_growth"),
+        }.items()
+        if _has_value(value)
+    }
+    return context
+
+
 async def build_analysis_context(
     symbol: str,
     repo: Any,
     news_loader: Any = None,
     overview_loader: Any = None,
+    fundamental_loader: Any = load_cached_fundamentals,
 ) -> dict[str, Any]:
     rows = repo.load_market_features(symbols=[symbol], columns=AI_FEATURE_COLUMNS, limit=365)
     context = select_market_feature_context(symbol, rows)
+    context = await enrich_fundamental_context(symbol, context, fundamental_loader)
     if news_loader is not None:
         context["news"] = await news_loader(symbol)
     if overview_loader is not None:

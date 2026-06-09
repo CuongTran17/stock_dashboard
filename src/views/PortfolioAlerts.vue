@@ -160,6 +160,7 @@ interface PriceAlert {
 const {
   stocks,
   fetchInitialData,
+  loadSymbolData,
 } = useStockData()
 
 const positions = ref<PortfolioItem[]>([])
@@ -170,7 +171,7 @@ const currentPriceMap = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   Object.values(stocks).forEach((stock) => {
     if (stock.price > 0 && stock.dataStatus !== 'NO_DATA_IN_SNAPSHOT') {
-      map[stock.symbol] = stock.price
+      map[stock.symbol] = toDisplayPrice(stock.price)
     }
   })
   return map
@@ -262,8 +263,7 @@ function toDisplayPrice(raw: number | null | undefined): number {
 
 function formatPrice(value: number): string {
   return new Intl.NumberFormat('vi-VN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 0,
   }).format(value)
 }
 
@@ -281,6 +281,7 @@ async function loadPortfolio(): Promise<void> {
   try {
     const data = await getMyPortfolio()
     positions.value = data.items
+    await loadPositionPrices()
   } catch (error: any) {
     errorMessage.value = error?.message || 'Không thể tải danh mục.'
     positions.value = []
@@ -289,8 +290,21 @@ async function loadPortfolio(): Promise<void> {
   }
 }
 
+async function loadPositionPrices(): Promise<void> {
+  const symbols = Array.from(
+    new Set(
+      positions.value
+        .map((position) => position.symbol.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  )
+
+  await Promise.all(symbols.map((symbol) => loadSymbolData(symbol)))
+}
+
 onMounted(async () => {
-  await Promise.all([fetchInitialData(), loadPortfolio()])
+  await fetchInitialData()
+  await loadPortfolio()
 })
 
 </script>
