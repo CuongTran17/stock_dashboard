@@ -90,10 +90,10 @@ import TabRevenue from './components/TabRevenue.vue'
 import TabUsers from './components/TabUsers.vue'
 import TabPortfolios from './components/TabPortfolios.vue'
 import TabPromotions from './components/TabPromotions.vue'
-import TabFlashSales from './components/TabFlashSales.vue'
+import TabReports from './components/TabReports.vue'
 import TabEtlMonitor from './components/TabEtlMonitor.vue'
 
-type AdminTab = 'revenue' | 'users' | 'portfolios' | 'promotions' | 'flash-sales' | 'etl-monitor'
+type AdminTab = 'revenue' | 'users' | 'portfolios' | 'promotions' | 'reports' | 'etl-monitor'
 
 const tabs: Array<{
   key: AdminTab
@@ -127,15 +127,15 @@ const tabs: Array<{
     key: 'promotions',
     label: 'Khuyến mãi',
     shortLabel: 'K',
-    description: 'Quản trị mã giảm giá premium và thời gian áp dụng.',
+    description: 'Quản trị mã giảm giá premium và flash sale.',
     badgeClass: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300',
   },
   {
-    key: 'flash-sales',
-    label: 'Flash Sale',
-    shortLabel: 'F',
-    description: 'Tạo ưu đãi hệ thống tự động áp dụng cho checkout.',
-    badgeClass: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300',
+    key: 'reports',
+    label: 'Báo cáo',
+    shortLabel: 'B',
+    description: 'Xuất doanh thu, người dùng và đơn hàng theo thời gian.',
+    badgeClass: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300',
   },
   {
     key: 'etl-monitor',
@@ -159,7 +159,7 @@ const activeComponent = computed(() => {
   if (activeTab.value === 'users') return TabUsers
   if (activeTab.value === 'portfolios') return TabPortfolios
   if (activeTab.value === 'promotions') return TabPromotions
-  if (activeTab.value === 'flash-sales') return TabFlashSales
+  if (activeTab.value === 'reports') return TabReports
   if (activeTab.value === 'etl-monitor') return TabEtlMonitor
   return TabRevenue
 })
@@ -167,7 +167,8 @@ const activeComponent = computed(() => {
 const activeTabMeta = computed(() => tabs.find((tab) => tab.key === activeTab.value) || tabs[0])
 
 function resolveTab(value: unknown): AdminTab {
-  return value === 'users' || value === 'portfolios' || value === 'promotions' || value === 'flash-sales' || value === 'etl-monitor' ? value : 'revenue'
+  if (value === 'flash-sales') return 'promotions'
+  return value === 'users' || value === 'portfolios' || value === 'promotions' || value === 'reports' || value === 'etl-monitor' ? value : 'revenue'
 }
 
 function setActiveTab(tab: AdminTab): void {

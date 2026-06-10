@@ -4,10 +4,12 @@ Provides endpoints for admin dashboard: sales stats, user management,
 and customer portfolio overview for advisory purposes.
 """
 import logging
-from datetime import datetime, timezone
+from io import BytesIO
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -15,6 +17,12 @@ from sqlalchemy.orm import Session
 from src.api.auth import require_auth, require_role
 from src.database.db import get_db
 from src.database.models import AIPrediction, FlashSale, PromotionCode, User, UserPortfolio, UserSubscription
+from src.services.admin_reports import (
+    ReportFilters,
+    build_admin_report,
+    report_to_pdf,
+    report_to_xlsx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +54,42 @@ class FlashSalePayload(BaseModel):
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
     is_active: bool = True
+
+
+def _parse_report_date(value: Optional[str], field_name: str) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} phải có định dạng YYYY-MM-DD") from exc
+
+
+def _report_filters_from_query(
+    report_type: str,
+    period: str,
+    anchor_date: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+    sort: str,
+) -> ReportFilters:
+    allowed_types = {"summary", "revenue", "users", "orders"}
+    allowed_periods = {"day", "month", "quarter", "year", "all", "custom"}
+    allowed_sorts = {"asc", "desc"}
+    if report_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="report_type không hợp lệ")
+    if period not in allowed_periods:
+        raise HTTPException(status_code=400, detail="period không hợp lệ")
+    if sort not in allowed_sorts:
+        raise HTTPException(status_code=400, detail="sort không hợp lệ")
+    return ReportFilters(
+        report_type=report_type,  # type: ignore[arg-type]
+        period=period,  # type: ignore[arg-type]
+        anchor_date=_parse_report_date(anchor_date, "anchor_date"),
+        start_date=_parse_report_date(start_date, "start_date"),
+        end_date=_parse_report_date(end_date, "end_date"),
+        sort=sort,  # type: ignore[arg-type]
+    )
 
 
 def _promotion_to_dict(promo: PromotionCode) -> dict[str, Any]:
@@ -151,6 +195,72 @@ def get_sales_stats(
             for row in monthly_revenue
         ],
     }
+
+
+@router.get("/reports/summary")
+def get_admin_report_summary(
+    report_type: str = Query(default="summary"),
+    period: str = Query(default="month"),
+    anchor_date: Optional[str] = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+    sort: str = Query(default="asc"),
+    current_user: User = Depends(_require_admin),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    filters = _report_filters_from_query(
+        report_type=report_type,
+        period=period,
+        anchor_date=anchor_date,
+        start_date=start_date,
+        end_date=end_date,
+        sort=sort,
+    )
+    try:
+        return build_admin_report(db, filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/reports/export")
+def export_admin_report(
+    report_type: str = Query(default="summary"),
+    period: str = Query(default="month"),
+    export_format: str = Query(default="xlsx", alias="format"),
+    anchor_date: Optional[str] = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    end_date: Optional[str] = Query(default=None),
+    sort: str = Query(default="asc"),
+    current_user: User = Depends(_require_admin),
+    db: Session = Depends(get_db),
+):
+    del current_user
+    if export_format not in {"xlsx", "pdf"}:
+        raise HTTPException(status_code=400, detail="format phải là pdf hoặc xlsx")
+    filters = _report_filters_from_query(
+        report_type=report_type,
+        period=period,
+        anchor_date=anchor_date,
+        start_date=start_date,
+        end_date=end_date,
+        sort=sort,
+    )
+    try:
+        report = build_admin_report(db, filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    payload = report_to_pdf(report) if export_format == "pdf" else report_to_xlsx(report)
+    media_type = "application/pdf" if export_format == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    start_label = report["range"]["start_date"] or "all"
+    end_label = report["range"]["end_date"] or "all"
+    filename = f"admin_report_{report_type}_{start_label}_{end_label}.{export_format}"
+    return StreamingResponse(
+        BytesIO(payload),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/users")

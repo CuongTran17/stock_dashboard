@@ -83,6 +83,39 @@ export interface SalesStats {
   monthly_revenue: { month: string; revenue: number; count: number }[]
 }
 
+export type AdminReportType = 'summary' | 'revenue' | 'users' | 'orders'
+export type AdminReportPeriod = 'day' | 'month' | 'quarter' | 'year' | 'all' | 'custom'
+export type AdminReportSort = 'asc' | 'desc'
+export type AdminReportFormat = 'pdf' | 'xlsx'
+
+export interface AdminReportFilters {
+  report_type: AdminReportType
+  period: AdminReportPeriod
+  anchor_date?: string
+  start_date?: string
+  end_date?: string
+  sort: AdminReportSort
+}
+
+export interface AdminReportSection {
+  title: string
+  summary: Record<string, number | string>
+  details: Record<string, number | string>[]
+}
+
+export interface AdminReportResponse {
+  report_type: AdminReportType
+  period: AdminReportPeriod
+  sort: AdminReportSort
+  range: {
+    start_date: string | null
+    end_date: string | null
+    bucket: string
+    label: string
+  }
+  sections: Record<string, AdminReportSection>
+}
+
 export interface AdminUserPortfolio {
   user: { id: number; email: string; fullname: string; role: string }
   holdings: {
@@ -460,6 +493,39 @@ export async function removeFromPortfolio(symbol: string): Promise<{ message: st
 
 export async function getAdminSalesStats(): Promise<SalesStats> {
   return authFetch<SalesStats>('/api/admin/sales-stats')
+}
+
+function buildAdminReportQuery(filters: AdminReportFilters, format?: AdminReportFormat): string {
+  const params = new URLSearchParams({
+    report_type: filters.report_type,
+    period: filters.period,
+    sort: filters.sort,
+  })
+  if (filters.anchor_date) params.set('anchor_date', filters.anchor_date)
+  if (filters.start_date) params.set('start_date', filters.start_date)
+  if (filters.end_date) params.set('end_date', filters.end_date)
+  if (format) params.set('format', format)
+  return params.toString()
+}
+
+export async function getAdminReport(filters: AdminReportFilters): Promise<AdminReportResponse> {
+  return authFetch<AdminReportResponse>(`/api/admin/reports/summary?${buildAdminReportQuery(filters)}`)
+}
+
+export async function downloadAdminReport(
+  filters: AdminReportFilters,
+  format: AdminReportFormat,
+): Promise<Blob> {
+  const token = getToken()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const response = await fetch(`${BACKEND_URL}/api/admin/reports/export?${buildAdminReportQuery(filters, format)}`, {
+    headers,
+  })
+  if (!response.ok) {
+    throw new Error(await response.text() || 'Không thể xuất báo cáo.')
+  }
+  return response.blob()
 }
 
 export async function getAdminUsers(
