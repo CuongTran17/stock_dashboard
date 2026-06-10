@@ -1,5 +1,23 @@
 <template>
   <div class="space-y-6">
+    <div class="rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-white/[0.03]">
+      <div class="flex flex-col gap-2 sm:flex-row">
+        <button
+          v-for="tab in promotionTabs"
+          :key="tab.key"
+          class="flex-1 rounded-xl px-4 py-3 text-left transition"
+          :class="activePromotionTab === tab.key ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/10 dark:text-brand-300' : 'text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800/70'"
+          @click="setActivePromotionTab(tab.key)"
+        >
+          <span class="block text-sm font-semibold">{{ tab.label }}</span>
+          <span class="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">{{ tab.description }}</span>
+        </button>
+      </div>
+    </div>
+
+    <TabFlashSales v-if="activePromotionTab === 'flash-sales'" />
+
+    <template v-else>
     <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-white/[0.03]">
       <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
@@ -253,11 +271,14 @@
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import TabFlashSales from './TabFlashSales.vue'
 import {
   createPromotion,
   deletePromotion,
@@ -267,6 +288,8 @@ import {
   type PromotionCode,
   type PromotionPayload,
 } from '@/services/authApi'
+
+type PromotionTab = 'codes' | 'flash-sales'
 
 type PromotionForm = {
   code: string
@@ -290,8 +313,40 @@ const notice = ref('')
 const noticeType = ref<'success' | 'error'>('success')
 const editingId = ref<number | null>(null)
 const processingId = ref<number | null>(null)
+const activePromotionTab = ref<PromotionTab>('codes')
+const route = useRoute()
+const router = useRouter()
 
 const form = ref<PromotionForm>(buildEmptyForm())
+
+const promotionTabs: Array<{
+  key: PromotionTab
+  label: string
+  description: string
+}> = [
+  {
+    key: 'codes',
+    label: 'Mã khuyến mãi',
+    description: 'Tạo và quản lý mã giảm giá thủ công.',
+  },
+  {
+    key: 'flash-sales',
+    label: 'Flash Sale',
+    description: 'Ưu đãi tự động áp dụng cho checkout.',
+  },
+]
+
+function resolvePromotionTab(value: unknown, adminTab: unknown): PromotionTab {
+  return value === 'flash-sales' || adminTab === 'flash-sales' ? 'flash-sales' : 'codes'
+}
+
+function setActivePromotionTab(tab: PromotionTab): void {
+  activePromotionTab.value = tab
+  router.replace({
+    path: '/admin',
+    query: tab === 'flash-sales' ? { tab: 'promotions', promotionTab: 'flash-sales' } : { tab: 'promotions' },
+  })
+}
 
 const noticeClass = computed(() =>
   noticeType.value === 'success'
@@ -461,4 +516,12 @@ async function removePromotion(promotion: PromotionCode): Promise<void> {
 onMounted(() => {
   loadPromotions()
 })
+
+watch(
+  () => [route.query.promotionTab, route.query.tab],
+  ([promotionTab, adminTab]) => {
+    activePromotionTab.value = resolvePromotionTab(promotionTab, adminTab)
+  },
+  { immediate: true },
+)
 </script>

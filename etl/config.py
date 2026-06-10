@@ -26,6 +26,7 @@ NO_GOOGLE_NEWS_FALLBACK = "NO_GOOGLE_NEWS_IN_RANGE"
 
 # Nguồn dữ liệu ưu tiên cho extract (fallback theo thứ tự)
 DEFAULT_EXTRACT_SOURCES: list[str] = ["KBS", "VCI"]
+DEFAULT_INDEX_EXTRACT_SOURCES: list[str] = ["VCI", "KBS"]
 
 # Schedule defaults.
 SCHEDULE_TIMEZONE = "Asia/Ho_Chi_Minh"
@@ -125,6 +126,7 @@ class EtlConfig:
 
     # Multi-source fallback cho extract giá.
     extract_sources: list[str] = field(default_factory=lambda: list(DEFAULT_EXTRACT_SOURCES))
+    index_extract_sources: list[str] = field(default_factory=lambda: list(DEFAULT_INDEX_EXTRACT_SOURCES))
 
     # Feature flags cho extract layer.
     enable_fundamental: bool = True
@@ -206,6 +208,7 @@ class EtlConfig:
         lake_dir: str | Path = "lake",
         log_dir: str | Path = "logs",
         extract_sources: list[str] | None = None,
+        index_extract_sources: list[str] | None = None,
         enable_fundamental: bool = True,
         enable_google_news: bool = True,
         google_news_period: str = "7d",
@@ -232,6 +235,7 @@ class EtlConfig:
             lake_dir=Path(lake_dir),
             log_dir=Path(log_dir),
             extract_sources=list(extract_sources or DEFAULT_EXTRACT_SOURCES),
+            index_extract_sources=list(index_extract_sources or DEFAULT_INDEX_EXTRACT_SOURCES),
             enable_fundamental=enable_fundamental,
             enable_google_news=enable_google_news,
             google_news_period=google_news_period,
