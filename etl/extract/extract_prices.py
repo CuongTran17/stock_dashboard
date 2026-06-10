@@ -89,7 +89,7 @@ def extract_symbol_prices(symbol: str, cfg: EtlConfig) -> Optional[Path]:
 
 def extract_index_prices(index_symbol: str, cfg: EtlConfig) -> Optional[Path]:
     """Fetch giá chỉ số (VNINDEX/VN30/...)."""
-    df = _fetch_history_with_fallback(index_symbol, cfg.fetch_start, cfg.user_end, cfg.extract_sources)
+    df = _fetch_history_with_fallback(index_symbol, cfg.fetch_start, cfg.user_end, cfg.index_extract_sources)
     if df is None or df.empty:
         log.warning("No macro index data returned for %s", index_symbol)
         return None
